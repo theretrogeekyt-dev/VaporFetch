@@ -906,7 +906,8 @@ def fetch_licenses(username: str) -> Set[int]:
         return set()
 
     cmd = [steamcmd_bin, "+login", username]
-    if pwd and re.match(r'^[A-Za-z0-9_]+$', pwd):
+    # Allow passwords with dashes, dots, and special characters (avoid only '+' or '-' command/flag prefixes)
+    if pwd and not pwd.startswith("+") and not pwd.startswith("-") and " " not in pwd:
         cmd.append(pwd)
     cmd.extend(["+licenses_print", "+quit"])
 

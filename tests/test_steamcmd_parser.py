@@ -275,6 +275,14 @@ class TestSteamCMDParser(unittest.TestCase):
             self.assertIn("SecretPassword123", called_cmd)
             self.assertIn("+licenses_print", called_cmd)
 
+        # Verify passwords with dashes are correctly passed
+        auth_session.username = "testuser"
+        auth_session.pending_password = "word-word-word-word"
+        with patch("subprocess.run", return_value=mock_proc) as mock_run:
+            app_ids = fetch_licenses("testuser")
+            called_cmd = mock_run.call_args[0][0]
+            self.assertIn("word-word-word-word", called_cmd)
+
         auth_session.reset()
 
     def test_re_login_fail_matches_error_format(self):

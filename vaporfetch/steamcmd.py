@@ -227,6 +227,12 @@ def write_steam_login_config(
     if not username:
         return
 
+    # CRITICAL: Only write config.vdf if we actually have QR tokens!
+    # Writing empty tokens destroys SteamCMD's real cached login tickets,
+    # sentry files, and machine signatures.
+    if not refresh_token and not access_token:
+        return
+
     search_dirs = [
         DATA_DIR / "steam" / "Steam",
         DATA_DIR / "steam" / ".steam",
@@ -1195,7 +1201,8 @@ def run_app_download(
     pwd = auth_session.pending_password if auth_session.username == active_user else None
 
     # Verify credentials exist before launching SteamCMD
-    if not session.get("logged_in") and not has_steamcmd_cached_credentials(active_user) and not pwd:
+    has_cached = has_steamcmd_cached_credentials(active_user)
+    if not session.get("logged_in") and not has_cached and not pwd:
         err = (
             f"Steam authentication not found for '{active_user}'. "
             "Please click 'Login' to sign in with your Steam account."
@@ -1203,15 +1210,6 @@ def run_app_download(
         if log_cb:
             log_cb(err)
         return {"success": False, "error": err}
-
-    # Ensure Steam configuration files exist for the user
-    if session.get("logged_in") and active_user:
-        write_steam_login_config(
-            username=active_user,
-            steam_id=session.get("steam_id", ""),
-            refresh_token=session.get("refresh_token", ""),
-            access_token=session.get("access_token", ""),
-        )
 
     # Ensure install_dir does not contain '+' which breaks SteamCMD CLI parameter parsing
     safe_install_dir = re.sub(r'\+', '_', install_dir)
@@ -1412,11 +1410,22 @@ def run_app_download(
                         try:
                             with open(sc, "r", encoding="utf-8", errors="replace") as f:
                                 tail = [l.strip() for l in f.readlines() if l.strip()]
-                                if tail:
-                                    err_text = tail[-1]
+                                # Filter out benign hardware warning messages from DMI / sysfs
+                                relevant = [
+                                    l for l in tail
+                                    if "flock /sys/devices" not in l and "LOCK_SH failed" not in l
+                                ]
+                                err_text = relevant[-1] if relevant else (tail[-1] if tail else "")
+                                if err_text:
+                                    if "!BLoggedOn" in err_text or "LoggedOn" in err_text:
+                                        error_message = (
+                                            f"Steam account '{active_user}' is not logged in. "
+                                            "Please click 'Login' or 'Account' in the web interface to authenticate."
+                                        )
+                                    else:
+                                        error_message = f"SteamCMD error: {err_text} (exit code {retcode})"
                                     if log_cb:
                                         log_cb(f"SteamCMD stderr: {err_text}")
-                                    error_message = f"SteamCMD error: {err_text} (exit code {retcode})"
                                     break
                         except Exception:
                             pass

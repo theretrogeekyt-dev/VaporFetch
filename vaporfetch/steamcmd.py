@@ -114,6 +114,7 @@ class SteamCMDAuthSession:
         self.username: str = ""
         self.pending_password: Optional[str] = None
         self.pending_code: Optional[str] = None
+        self.password_injected: bool = False
         self.code_injected_at: int = -1
         self.status: str = "idle"  # idle, authenticating, awaiting_2fa, logged_in, failed
         self.two_factor_type: str = "email"
@@ -140,6 +141,7 @@ class SteamCMDAuthSession:
             self.username = ""
             self.pending_password = None
             self.pending_code = None
+            self.password_injected = False
             self.code_injected_at = -1
             self.status = "idle"
             self.two_factor_type = "email"
@@ -354,11 +356,8 @@ def start_login(username: str, password: Optional[str] = None, code: Optional[st
 
     steamcmd_bin = find_steamcmd_path()
 
-    cmd = [steamcmd_bin]
-    if password:
-        cmd.extend(["+login", username, password])
-    else:
-        cmd.extend(["+login", username])
+    # Valve recommends entering passwords at the interactive prompt to support special characters (+, %, &, spaces, quotes)
+    cmd = [steamcmd_bin, "+login", username]
 
     log_steamcmd(f"Starting interactive SteamCMD login for '{username}'...")
 
@@ -528,6 +527,21 @@ def _monitor_login_pty():
             for line in chunk.splitlines():
                 if line.strip():
                     log_steamcmd(line.strip())
+
+            # Check for interactive password prompt in accumulated output
+            if not auth_session.password_injected and re.search(r"(?:^|\n|\r|[ ;:\.])[Pp]assword:\s*$", accumulated):
+                if auth_session.pending_password:
+                    auth_session.password_injected = True
+                    log_steamcmd("Submitting password securely to SteamCMD interactive prompt...")
+                    try:
+                        os.write(master_fd, f"{auth_session.pending_password}\n".encode("utf-8"))
+                    except Exception as e:
+                        logger.error(f"Failed to write password to PTY: {e}")
+                    continue
+                else:
+                    auth_session.status = "failed"
+                    auth_session.error_message = "Steam account password required. Please enter your password to sign in."
+                    break
 
             # If a 2FA code was already injected (upfront or via submit_2fa_code),
             # only inspect output arriving AFTER the injection!
@@ -728,11 +742,9 @@ def fetch_licenses(username: str) -> Set[int]:
         log_steamcmd(f"Notice: No active password or SteamCMD cached credentials for '{username}'. Re-authentication required.")
         return set()
 
-    cmd = [steamcmd_bin]
-    if pwd:
-        cmd.extend(["+login", username, pwd])
-    else:
-        cmd.extend(["+login", username])
+    cmd = [steamcmd_bin, "+login", username]
+    if pwd and re.match(r'^[A-Za-z0-9_]+$', pwd):
+        cmd.append(pwd)
     cmd.extend(["+licenses_print", "+quit"])
 
     log_steamcmd(f"Querying SteamCMD licenses for user '{username}'...")
@@ -740,6 +752,7 @@ def fetch_licenses(username: str) -> Set[int]:
     try:
         res = subprocess.run(
             cmd,
+            input=f"{pwd}\n" if pwd else None,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -840,11 +853,10 @@ def run_app_download(
     cmd = [
         steamcmd_bin,
         "+force_install_dir", safe_install_dir,
+        "+login", username,
     ]
-    if pwd:
-        cmd.extend(["+login", username, pwd])
-    else:
-        cmd.extend(["+login", username])
+    if pwd and re.match(r'^[A-Za-z0-9_]+$', pwd):
+        cmd.append(pwd)
 
     if platform and platform.lower() in ("windows", "linux", "macos"):
         cmd.extend(["+@sSteamCmdForcePlatformType", platform.lower()])
@@ -863,6 +875,7 @@ def run_app_download(
     try:
         proc = subprocess.Popen(
             cmd,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -878,6 +891,7 @@ def run_app_download(
     last_time = time.time()
     success = False
     error_message = ""
+    password_injected = False
 
     while True:
         if cancel_event and cancel_event.is_set():
@@ -895,6 +909,18 @@ def run_app_download(
             continue
 
         if log_cb:
+            log_cb(line_str)
+
+        # Handle interactive password prompt during app download if prompted
+        if pwd and not password_injected and re.search(r"(?:^|\n|\r|[ ;:\.])[Pp]assword:\s*$", line_str):
+            password_injected = True
+            if log_cb:
+                log_cb("Entering password securely for SteamCMD download...")
+            try:
+                proc.stdin.write(f"{pwd}\n")
+                proc.stdin.flush()
+            except Exception as e:
+                logger.error(f"Failed to pass password to SteamCMD stdin: {e}")
             log_cb(line_str)
 
         # Check success/error

@@ -288,13 +288,14 @@
             <div id="loginStepCredentials">
               <p class="modal-info">Log into your Steam account through SteamCMD to browse and backup your owned games.</p>
               <div class="form-group">
-                <label for="loginUsername">Steam Username:</label>
-                <input type="text" id="loginUsername" class="text-input" placeholder="Steam account username" required autocomplete="username">
+                <label for="loginUsername">Steam Account Username:</label>
+                <input type="text" id="loginUsername" class="text-input" placeholder="e.g. reaper360vr" required autocomplete="username">
+                <small class="form-hint">Must be your Steam <strong>account login name</strong> (e.g. <code>reaper360vr</code>), NOT your display name or vanity URL.</small>
               </div>
               <div class="form-group">
                 <label for="loginPassword">Steam Password:</label>
                 <input type="password" id="loginPassword" class="text-input" placeholder="Password" autocomplete="current-password">
-                <small class="form-hint">Leave blank if you previously logged in and have remembered credentials.</small>
+                <small class="form-hint">Password is submitted interactively (all special characters including <code>!@#$%^&amp;*+</code> supported).</small>
               </div>
               <div class="form-group">
                 <label for="loginSteamGuard">Steam Guard Code (Optional / Faster Login):</label>

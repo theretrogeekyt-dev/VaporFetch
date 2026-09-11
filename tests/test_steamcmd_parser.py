@@ -173,7 +173,8 @@ class TestSteamCMDParser(unittest.TestCase):
             called_cmd = mock_popen.call_args[0][0]
             self.assertIn("+login", called_cmd)
             self.assertIn("testuser", called_cmd)
-            self.assertIn("secretpass", called_cmd)
+            self.assertNotIn("secretpass", called_cmd)
+            self.assertEqual(auth_session.pending_password, "secretpass")
             mock_thread.return_value.start.assert_called_once()
 
     def test_begin_and_poll_qr_login(self):
@@ -305,6 +306,47 @@ class TestSteamCMDParser(unittest.TestCase):
             mock_save.assert_not_called()
             self.assertIn("Re-authenticate", auth_session.last_error)
             self.assertNotIn("Invalid Steam password", auth_session.last_error)
+
+    def test_monitor_login_pty_injects_password(self):
+        from unittest.mock import patch, MagicMock
+        from vaporfetch.steamcmd import _monitor_login_pty, auth_session
+
+        auth_session.reset()
+        auth_session.status = "authenticating"
+        auth_session.username = "reaper360vr"
+        auth_session.pending_password = "MyComplex+Password!123"
+        auth_session.master_fd = 999
+        auth_session.process = MagicMock()
+        auth_session.process.poll.return_value = None
+
+        chunks = [
+            b"Logging in user 'reaper360vr' to Steam Public...\npassword: ",
+            b"\nLogged in OK\nSteam>",
+        ]
+        chunk_idx = [0]
+        written = []
+
+        def mock_read(fd, n):
+            if chunk_idx[0] < len(chunks):
+                data = chunks[chunk_idx[0]]
+                chunk_idx[0] += 1
+                return data
+            auth_session.status = "done"
+            return b""
+
+        def mock_write(fd, data):
+            written.append(data)
+            return len(data)
+
+        with patch("select.select", return_value=([999], [], [])), \
+             patch("os.read", side_effect=mock_read), \
+             patch("os.write", side_effect=mock_write), \
+             patch("os.close"), \
+             patch("vaporfetch.steamcmd.save_current_session"):
+            _monitor_login_pty()
+
+        self.assertTrue(auth_session.password_injected)
+        self.assertIn(b"MyComplex+Password!123\n", written)
 
 if __name__ == "__main__":
     unittest.main()

@@ -19,17 +19,49 @@ from vaporfetch.config import (
 from vaporfetch.steamcmd import get_current_session, fetch_licenses
 
 # Pre-populated dictionary of common Steam games for instant offline lookup
-COMMON_STEAM_APPS = {
+COMMON_STEAM_APPS: Dict[int, str] = {
+    # Valve GoldSrc & Classic games
     10: "Counter-Strike",
+    20: "Team Fortress Classic",
+    30: "Day of Defeat",
+    40: "Deathmatch Classic",
+    50: "Half-Life: Opposing Force",
+    60: "Ricochet",
     70: "Half-Life",
+    80: "Counter-Strike: Condition Zero",
+    100: "Counter-Strike: Condition Zero Deleted Scenes",
+    130: "Half-Life: Blue Shift",
+    # Valve Source games
     220: "Half-Life 2",
     240: "Counter-Strike: Source",
+    280: "Half-Life: Source",
+    300: "Day of Defeat: Source",
+    320: "Half-Life 2: Deathmatch",
+    340: "Half-Life 2: Lost Coast",
+    360: "Half-Life Deathmatch: Source",
+    380: "Half-Life 2: Episode One",
     400: "Portal",
+    420: "Half-Life 2: Episode Two",
     440: "Team Fortress 2",
+    500: "Left 4 Dead",
     550: "Left 4 Dead 2",
     570: "Dota 2",
     620: "Portal 2",
+    630: "Alien Swarm",
     730: "Counter-Strike 2",
+    # DOOM & Bethesda classics
+    2280: "DOOM + DOOM II",
+    2290: "Final DOOM",
+    2300: "DOOM II",
+    2310: "Quake",
+    2320: "Quake II",
+    2330: "Quake III Arena",
+    2350: "Wolfenstein 3D",
+    2360: "Return to Castle Wolfenstein",
+    379720: "DOOM (2016)",
+    782330: "DOOM Eternal",
+    1148590: "DOOM 64",
+    # Popular Steam games
     105600: "Terraria",
     252490: "Rust",
     271590: "Grand Theft Auto V",
@@ -46,10 +78,31 @@ COMMON_STEAM_APPS = {
     2050650: "Resident Evil 4",
 }
 
+# Known internal Steam tools, dedicated servers, and engine packages
+KNOWN_TOOLS: Dict[int, str] = {
+    4: "Source SDK Base",
+    5: "Dedicated Server",
+    7: "Steam Client",
+    8: "winui2",
+    9: "Half-Life Beta",
+    90: "Half-Life Dedicated Server",
+    105: "Half-Life Linux Dedicated Server",
+    115: "Source Dedicated Server",
+    205: "Source SDK",
+    215: "Source SDK Base 2006",
+    218: "Source SDK Base 2007",
+    225: "Team Fortress 2 Dedicated Server",
+    245: "Counter-Strike: Source Dedicated Server",
+    255: "Day of Defeat: Source Dedicated Server",
+    1007: "Steam Translation Server",
+    228980: "Steamworks Common Redistributables",
+}
+
 class AppResolver:
-    """Resolves Steam AppIDs to game titles using local cache and Steam Web API."""
+    """Resolves Steam AppIDs to game titles using local cache, SteamSpy, and Steam Web API."""
     def __init__(self):
         self.app_map: Dict[int, str] = dict(COMMON_STEAM_APPS)
+        self.app_map.update(KNOWN_TOOLS)
         self._has_attempted_update = False
         self._load_cache()
 
@@ -79,7 +132,7 @@ class AppResolver:
         if api_key:
             try:
                 url = f"https://api.steampowered.com/IStoreService/GetAppList/v1/?key={api_key}&max_results=50000"
-                req = urllib.request.Request(url, headers={"User-Agent": "VaporFetch/1.0"})
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     payload = json.loads(resp.read().decode("utf-8"))
                     apps = payload.get("response", {}).get("apps", [])
@@ -94,38 +147,36 @@ class AppResolver:
             except Exception:
                 pass
 
-        # 2. Try legacy public endpoint if available
-        try:
-            url = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
-            req = urllib.request.Request(url, headers={"User-Agent": "VaporFetch/1.0"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
-                apps = payload.get("applist", {}).get("apps", [])
-                for item in apps:
-                    aid = item.get("appid")
-                    name = item.get("name", "").strip()
-                    if aid and name:
-                        self.app_map[int(aid)] = name
-                if apps:
-                    self.save_cache()
-                    return True
-        except Exception:
-            # Endpoint deprecated by Valve; titles fall back seamlessly to per-app store API lookup
-            pass
-
         return False
 
     def resolve_name(self, appid: int) -> str:
-        """Get the title for an AppID, querying store API if missing."""
+        """Get the title for an AppID, querying SteamSpy / Steam API if missing."""
         if appid in self.app_map:
             return self.app_map[appid]
 
-        # Try online store API lookup for single app
+        # 1. Try SteamSpy API (reliable, fast, no Akamai 403 block)
+        try:
+            url = f"https://steamspy.com/api.php?request=appdetails&appid={appid}"
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                name = (data.get("name") or "").strip()
+                if name and not name.lower().startswith("app_"):
+                    self.app_map[appid] = name
+                    self.save_cache()
+                    return name
+        except Exception:
+            pass
+
+        # 2. Try online store API lookup as fallback
         try:
             url = f"https://store.steampowered.com/api/appdetails?appids={appid}"
             req = urllib.request.Request(
                 url,
-                headers={"User-Agent": "VaporFetch/1.0"}
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
             )
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
@@ -236,12 +287,18 @@ def populate_and_cache_games(app_ids: Set[int]) -> List[Dict[str, Any]]:
         return []
 
     # Attempt updating app cache if needed
-    if len(resolver.app_map) <= len(COMMON_STEAM_APPS):
+    if len(resolver.app_map) <= len(COMMON_STEAM_APPS) + len(KNOWN_TOOLS):
         resolver.update_from_steam_api()
 
     games = []
     for aid in sorted(app_ids):
         name = resolver.resolve_name(aid)
+        is_tool = (
+            aid in KNOWN_TOOLS
+            or "dedicated server" in name.lower()
+            or name.lower().startswith("steam client")
+            or name.lower() in ("winui2", "steamworks common redistributables")
+        )
         status_info = check_backup_status(name, aid)
         games.append({
             "appid": aid,
@@ -250,6 +307,7 @@ def populate_and_cache_games(app_ids: Set[int]) -> List[Dict[str, Any]]:
             "backup_status": status_info["status"],
             "backup_size": status_info["size_formatted"],
             "backup_size_bytes": status_info["size_bytes"],
+            "is_tool": is_tool,
         })
 
     # Save to cache

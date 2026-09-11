@@ -185,7 +185,9 @@ if FastAPI is not None:
     async def add_queue_endpoint(payload: QueueAddRequest):
         if payload.all_games:
             library = get_library(force_refresh=False)
-            items = [{"appid": g["appid"], "name": g["name"]} for g in library]
+            items = [{"appid": g["appid"], "name": g["name"]} for g in library if not g.get("is_tool")]
+            if not items:
+                items = [{"appid": g["appid"], "name": g["name"]} for g in library]
             added = manager.add_batch(items, platform=payload.platform)
             return {"status": "ok", "queued_count": added, "message": f"Queued {added} games from entire library."}
 

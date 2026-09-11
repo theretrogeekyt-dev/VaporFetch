@@ -29,19 +29,39 @@ class TestLibrary(unittest.TestCase):
         self.assertEqual(resolver.resolve_name(730), "Counter-Strike 2")
         self.assertEqual(resolver.resolve_name(400), "Portal")
         self.assertEqual(resolver.resolve_name(105600), "Terraria")
+        self.assertEqual(resolver.resolve_name(1148590), "DOOM 64")
+        # Known tools / dedicated servers
+        self.assertEqual(resolver.resolve_name(5), "Dedicated Server")
+        self.assertEqual(resolver.resolve_name(90), "Half-Life Dedicated Server")
         # Unknown offline game fallback
         self.assertEqual(resolver.resolve_name(99999999), "Steam App 99999999")
 
     def test_populate_and_cache_games(self):
         from vaporfetch.library import populate_and_cache_games
-        games = populate_and_cache_games({730, 400})
-        self.assertEqual(len(games), 2)
-        appids = [g["appid"] for g in games]
-        self.assertIn(730, appids)
-        self.assertIn(400, appids)
-        names = [g["name"] for g in games]
-        self.assertIn("Counter-Strike 2", names)
-        self.assertIn("Portal", names)
+        games = populate_and_cache_games({730, 400, 5, 90})
+        self.assertEqual(len(games), 4)
+        games_by_id = {g["appid"]: g for g in games}
+        self.assertFalse(games_by_id[730]["is_tool"])
+        self.assertFalse(games_by_id[400]["is_tool"])
+        self.assertTrue(games_by_id[5]["is_tool"])
+        self.assertTrue(games_by_id[90]["is_tool"])
+
+    def test_app_resolver_steamspy(self):
+        from unittest.mock import patch, MagicMock
+        import json
+        from vaporfetch.library import AppResolver
+
+        custom_resolver = AppResolver()
+        mock_resp = MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.read.return_value = json.dumps({
+            "appid": 888888,
+            "name": "Custom Indie Game"
+        }).encode("utf-8")
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            name = custom_resolver.resolve_name(888888)
+            self.assertEqual(name, "Custom Indie Game")
 
     def test_get_library_web_api(self):
         from unittest.mock import patch, MagicMock

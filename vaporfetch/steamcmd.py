@@ -330,6 +330,48 @@ def _monitor_login_pty():
     master_fd = auth_session.master_fd
     accumulated = ""
 
+    def _finish_login(accum_str: str) -> str:
+        auth_session.status = "logged_in"
+        auth_session.pending_password = None
+        save_current_session(auth_session.username, logged_in=True, auth_method="steamcmd")
+        # Query licenses directly on the authenticated interactive prompt and cleanly quit.
+        # This saves Steam credentials to config.vdf so future runs work,
+        # and collects all owned game licenses without starting a second competing process.
+        try:
+            logger.info("Login successful. Fetching owned licenses via interactive PTY...")
+            os.write(master_fd, b"licenses_print\nquit\n")
+            read_start = time.time()
+            while time.time() - read_start < 12.0:
+                r, _, _ = select.select([master_fd], [], [], 0.5)
+                if not r:
+                    if auth_session.process and auth_session.process.poll() is not None:
+                        break
+                    continue
+                ch = os.read(master_fd, 4096).decode("utf-8", errors="replace")
+                if not ch:
+                    break
+                accum_str += ch
+        except Exception as e:
+            logger.warning(f"Notice while reading licenses on login: {e}")
+
+        owned_app_ids = parse_licenses_output(accum_str)
+        if owned_app_ids:
+            try:
+                from vaporfetch.library import populate_and_cache_games
+                populate_and_cache_games(owned_app_ids)
+                logger.info(f"Cached {len(owned_app_ids)} owned games from login session.")
+            except Exception as e:
+                logger.error(f"Error caching owned games: {e}")
+
+        try:
+            if auth_session.process and auth_session.process.poll() is None:
+                auth_session.process.terminate()
+            os.close(master_fd)
+        except Exception:
+            pass
+        auth_session.master_fd = None
+        return accum_str
+
     while auth_session.status in ("authenticating", "awaiting_2fa"):
         try:
             r, _, _ = select.select([master_fd], [], [], 0.3)
@@ -355,9 +397,7 @@ def _monitor_login_pty():
                 result = check_login_output(post_code_output)
                 if result:
                     if result["status"] == "logged_in":
-                        auth_session.status = "logged_in"
-                        auth_session.pending_password = None
-                        save_current_session(auth_session.username, logged_in=True)
+                        accumulated = _finish_login(accumulated)
                         break
                     elif result["status"] == "awaiting_2fa":
                         # SteamCMD prompted for 2FA again after the code was injected!
@@ -396,9 +436,7 @@ def _monitor_login_pty():
                         continue
 
                 elif result["status"] == "logged_in":
-                    auth_session.status = "logged_in"
-                    auth_session.pending_password = None
-                    save_current_session(auth_session.username, logged_in=True)
+                    accumulated = _finish_login(accumulated)
                     break
                 elif result["status"] == "failed":
                     auth_session.status = "failed"
@@ -414,8 +452,7 @@ def _monitor_login_pty():
         if result:
             auth_session.status = result["status"]
             if result["status"] == "logged_in":
-                auth_session.pending_password = None
-                save_current_session(auth_session.username, logged_in=True)
+                accumulated = _finish_login(accumulated)
             elif result["status"] == "failed":
                 auth_session.error_message = result.get("error", "Login failed")
         else:
@@ -516,6 +553,19 @@ def parse_licenses_output(output: str) -> Set[int]:
 
 def fetch_licenses(username: str) -> Set[int]:
     """Run `licenses_print` in SteamCMD to obtain owned game AppIDs."""
+    if auth_session.process and auth_session.process.poll() is None:
+        try:
+            auth_session.process.terminate()
+            auth_session.process.wait(timeout=2)
+        except Exception:
+            pass
+    if auth_session.master_fd:
+        try:
+            os.close(auth_session.master_fd)
+        except Exception:
+            pass
+        auth_session.master_fd = None
+
     steamcmd_bin = find_steamcmd_path()
     cmd = [
         steamcmd_bin,
@@ -529,12 +579,13 @@ def fetch_licenses(username: str) -> Set[int]:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            timeout=120,
+            timeout=60,
             check=False,
         )
+        logger.info(f"fetch_licenses output: {res.stdout[-300:] if res.stdout else 'empty'}")
         return parse_licenses_output(res.stdout)
     except Exception as e:
-        print(f"[VaporFetch] Error fetching licenses: {e}")
+        logger.error(f"Error fetching licenses: {e}")
         return set()
 
 

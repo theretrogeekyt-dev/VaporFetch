@@ -94,6 +94,10 @@ if FastAPI is not None:
     @app.get("/api/status")
     async def get_status():
         session = get_current_session()
+        settings = load_settings()
+        api_key = settings.get("steam_api_key") or settings.get("api_key") or os.environ.get("STEAM_API_KEY", "")
+        session["has_api_key"] = bool(api_key)
+        session["auth_method"] = session.get("auth_method", "steamcmd")
         return {
             "session": session,
             "auth_state": {

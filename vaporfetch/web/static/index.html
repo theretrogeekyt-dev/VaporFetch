@@ -113,9 +113,13 @@
           </div>
           <div id="gamesEmpty" class="empty-state hidden">
             <div class="empty-icon">🎮</div>
-            <h3>No Games Found</h3>
-            <p>Log in with your Steam account to discover and backup your game library.</p>
+            <h3 id="emptyTitle">No Games Found</h3>
+            <p id="emptySubtitle">Log in with your Steam account to discover and backup your game library.</p>
             <button class="btn btn-primary" id="emptyLoginBtn">Log in to Steam</button>
+            <div id="qrEmptyActions" style="display: none; margin-top: 14px; gap: 10px; justify-content: center; flex-wrap: wrap;">
+              <button class="btn btn-primary" id="emptySettingsBtn">⚙️ Add Free Steam API Key</button>
+              <button class="btn btn-secondary" id="emptySwitchPasswordBtn">🔑 Sign In with Password & 2FA</button>
+            </div>
           </div>
           <div class="games-grid" id="gamesGrid">
             <!-- Game cards dynamically rendered here -->
@@ -238,7 +242,7 @@
             <div class="form-group">
               <label for="settingApiKey">Steam Web API Key (Optional):</label>
               <input type="text" id="settingApiKey" class="text-input" placeholder="Enter key if available...">
-              <small class="form-hint">Not required. VaporFetch automatically resolves games using public Steam manifests and SteamCMD licenses.</small>
+              <small class="form-hint">Used for Steam Mobile QR code library sync and Web API lookups. Obtain your free key from <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener" style="color: var(--accent-cyan); text-decoration: underline;">steamcommunity.com/dev/apikey</a>.</small>
             </div>
 
             <button type="submit" class="btn btn-primary">Save Settings</button>

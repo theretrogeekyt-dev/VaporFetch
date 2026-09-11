@@ -202,10 +202,45 @@ def format_bytes(size: float) -> str:
     return f"{size:.2f} TB"
 
 
+def populate_and_cache_games(app_ids: Set[int]) -> List[Dict[str, Any]]:
+    """
+    Resolve titles and build game library metadata for a set of AppIDs,
+    persisting results to LIBRARY_CACHE_FILE.
+    """
+    if not app_ids:
+        return []
+
+    # Attempt updating app cache if needed
+    if len(resolver.app_map) <= len(COMMON_STEAM_APPS):
+        resolver.update_from_steam_api()
+
+    games = []
+    for aid in sorted(app_ids):
+        name = resolver.resolve_name(aid)
+        status_info = check_backup_status(name, aid)
+        games.append({
+            "appid": aid,
+            "name": name,
+            "image": f"https://steamcdn-a.akamaihd.net/steam/apps/{aid}/header.jpg",
+            "backup_status": status_info["status"],
+            "backup_size": status_info["size_formatted"],
+            "backup_size_bytes": status_info["size_bytes"],
+        })
+
+    # Save to cache
+    try:
+        with open(LIBRARY_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(games, f, indent=2)
+    except Exception as e:
+        print(f"[VaporFetch] Error saving library cache: {e}")
+
+    return games
+
+
 def get_library(force_refresh: bool = False) -> List[Dict[str, Any]]:
     """
     Retrieve user's owned games library with backup status.
-    Uses cached licenses list or refreshes via SteamCMD.
+    Uses cached licenses list, Web API if key/steamid available, or refreshes via SteamCMD.
     """
     session = get_current_session()
     username = session.get("username", "")
@@ -229,18 +264,19 @@ def get_library(force_refresh: bool = False) -> List[Dict[str, Any]]:
 
     app_ids: Set[int] = set()
 
-    # 1. If we have access_token or api_key + steam_id, try fetching games from Steam Web API
-    access_token = session.get("access_token")
+    # 1. If we have steam_api_key + steam_id, query official Steam Web API GetOwnedGames
     steam_id = session.get("steam_id")
-    api_key = load_settings().get("api_key")
+    settings = load_settings()
+    api_key = settings.get("steam_api_key") or settings.get("api_key") or os.environ.get("STEAM_API_KEY", "")
 
-    if steam_id and (access_token or api_key):
+    if steam_id and api_key:
         try:
-            query = {"steamid": steam_id, "include_appinfo": 1, "include_played_free_games": 1}
-            if access_token:
-                query["access_token"] = access_token
-            elif api_key:
-                query["key"] = api_key
+            query = {
+                "key": api_key,
+                "steamid": steam_id,
+                "include_appinfo": 1,
+                "include_played_free_games": 1,
+            }
             url = f"https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?{urllib.parse.urlencode(query)}"
             req = urllib.request.Request(url, headers={"User-Agent": "VaporFetch/1.0"})
             with urllib.request.urlopen(req, timeout=10) as resp:
@@ -255,8 +291,8 @@ def get_library(force_refresh: bool = False) -> List[Dict[str, Any]]:
         except Exception as e:
             print(f"[VaporFetch] Notice: Web API GetOwnedGames query: {e}")
 
-    # 2. Also try SteamCMD licenses if not populated via Web API
-    if not app_ids:
+    # 2. Try SteamCMD licenses if not populated via Web API
+    if not app_ids and username:
         cmd_app_ids = fetch_licenses(username)
         if cmd_app_ids:
             app_ids.update(cmd_app_ids)
@@ -264,30 +300,5 @@ def get_library(force_refresh: bool = False) -> List[Dict[str, Any]]:
     if not app_ids:
         return []
 
-    # Attempt updating app cache if needed
-    if len(resolver.app_map) <= len(COMMON_STEAM_APPS):
-        resolver.update_from_steam_api()
-
-    games = []
-    for aid in sorted(app_ids):
-        # Ignore common steam redistributables / runtimes if desired (e.g. Steamworks Common Redistributables is 228980)
-        name = resolver.resolve_name(aid)
-        status_info = check_backup_status(name, aid)
-        games.append({
-            "appid": aid,
-            "name": name,
-            "image": f"https://steamcdn-a.akamaihd.net/steam/apps/{aid}/header.jpg",
-            "backup_status": status_info["status"],
-            "backup_size": status_info["size_formatted"],
-            "backup_size_bytes": status_info["size_bytes"],
-        })
-
-    # Save to cache
-    try:
-        with open(LIBRARY_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(games, f, indent=2)
-    except Exception as e:
-        print(f"[VaporFetch] Error saving library cache: {e}")
-
-    return games
+    return populate_and_cache_games(app_ids)
 

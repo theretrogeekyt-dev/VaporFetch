@@ -40,7 +40,12 @@ document.addEventListener("DOMContentLoaded", () => {
     gamesGrid: document.getElementById("gamesGrid"),
     gamesLoading: document.getElementById("gamesLoading"),
     gamesEmpty: document.getElementById("gamesEmpty"),
+    emptyTitle: document.getElementById("emptyTitle"),
+    emptySubtitle: document.getElementById("emptySubtitle"),
     emptyLoginBtn: document.getElementById("emptyLoginBtn"),
+    qrEmptyActions: document.getElementById("qrEmptyActions"),
+    emptySettingsBtn: document.getElementById("emptySettingsBtn"),
+    emptySwitchPasswordBtn: document.getElementById("emptySwitchPasswordBtn"),
 
     // Downloads Tab
     noActiveDownload: document.getElementById("noActiveDownload"),
@@ -238,6 +243,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
     elements.emptyLoginBtn.addEventListener("click", () => {
       openAuthModal();
+    });
+
+    elements.emptySettingsBtn?.addEventListener("click", () => {
+      document.querySelector('[data-tab="settingsTab"]')?.click();
+      elements.settingApiKey?.focus();
+    });
+
+    elements.emptySwitchPasswordBtn?.addEventListener("click", () => {
+      openAuthModal();
+      elements.authTabPassword?.click();
     });
 
     elements.modalCloseBtn.addEventListener("click", closeAuthModal);
@@ -605,6 +620,40 @@ document.addEventListener("DOMContentLoaded", () => {
   function showEmptyLibraryState() {
     elements.gamesGrid.innerHTML = "";
     elements.gamesEmpty.classList.remove("hidden");
+
+    if (state.user && state.user.logged_in) {
+      if (state.user.auth_method === "qr" && !state.user.has_api_key) {
+        if (elements.emptyTitle) elements.emptyTitle.textContent = "📱 Steam QR Code Login Active";
+        if (elements.emptySubtitle) {
+          elements.emptySubtitle.innerHTML =
+            "You are signed in via Steam Mobile QR Code! Valve's Web API requires a free Steam Web API Key to view your private library, or you can sign in with Password & 2FA to let SteamCMD sync your library directly.";
+        }
+        if (elements.qrEmptyActions) elements.qrEmptyActions.style.display = "flex";
+        if (elements.emptyLoginBtn) elements.emptyLoginBtn.style.display = "none";
+      } else {
+        if (elements.emptyTitle) elements.emptyTitle.textContent = "No Games Found";
+        if (elements.emptySubtitle) {
+          elements.emptySubtitle.textContent =
+            "No owned games detected. Click 'Sync Steam Library' above to refresh licenses from SteamCMD, or add an AppID manually.";
+        }
+        if (elements.qrEmptyActions) elements.qrEmptyActions.style.display = "none";
+        if (elements.emptyLoginBtn) {
+          elements.emptyLoginBtn.textContent = "Re-authenticate with Steam";
+          elements.emptyLoginBtn.style.display = "inline-block";
+        }
+      }
+    } else {
+      if (elements.emptyTitle) elements.emptyTitle.textContent = "No Games Found";
+      if (elements.emptySubtitle) {
+        elements.emptySubtitle.textContent =
+          "Log in with your Steam account to discover and backup your game library.";
+      }
+      if (elements.qrEmptyActions) elements.qrEmptyActions.style.display = "none";
+      if (elements.emptyLoginBtn) {
+        elements.emptyLoginBtn.textContent = "Log in to Steam";
+        elements.emptyLoginBtn.style.display = "inline-block";
+      }
+    }
   }
 
   function getFilteredGames() {
@@ -891,6 +940,10 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         if (res.ok) {
           alert("Settings saved successfully!");
+          if (updates.steam_api_key) {
+            if (state.user) state.user.has_api_key = true;
+            fetchLibrary(true);
+          }
         }
       } catch (err) {
         alert(`Failed to save settings: ${err.message}`);

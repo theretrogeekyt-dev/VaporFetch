@@ -37,17 +37,18 @@ if [ -d "${DATA_DIR}/steam_root" ] && [ ! -d "${STEAM_DIR}/.steam/steam/config/c
 fi
 
 # 4. Wire system symlinks to point directly into persistent /data/steam
+mkdir -p /root/.local/share
 rm -rf /root/.steam /root/Steam /root/.local/share/Steam 2>/dev/null || true
-ln -sfn "${STEAM_DIR}/.steam" /root/.steam
-ln -sfn "${STEAM_DIR}/Steam" /root/Steam
-ln -sfn "${STEAM_DIR}/.local/share/Steam" /root/.local/share/Steam
+ln -sfn "${STEAM_DIR}/.steam" /root/.steam || true
+ln -sfn "${STEAM_DIR}/Steam" /root/Steam || true
+ln -sfn "${STEAM_DIR}/.local/share/Steam" /root/.local/share/Steam || true
 
 # 5. Wire steamclient.so so SteamAPI never logs missing libraries
 if [ -f /opt/steamcmd/linux32/steamclient.so ]; then
-    ln -sf /opt/steamcmd/linux32/steamclient.so "${STEAM_DIR}/.steam/sdk32/steamclient.so"
+    ln -sf /opt/steamcmd/linux32/steamclient.so "${STEAM_DIR}/.steam/sdk32/steamclient.so" || true
 fi
 if [ -f /opt/steamcmd/linux64/steamclient.so ]; then
-    ln -sf /opt/steamcmd/linux64/steamclient.so "${STEAM_DIR}/.steam/sdk64/steamclient.so"
+    ln -sf /opt/steamcmd/linux64/steamclient.so "${STEAM_DIR}/.steam/sdk64/steamclient.so" || true
 fi
 
 # 6. Pre-seed Steam update packages to avoid initial download delay
@@ -65,18 +66,20 @@ PUID="${PUID:-0}"
 PGID="${PGID:-0}"
 
 if [ "${PUID}" -ne 0 ] && [ "${PGID}" -ne 0 ]; then
-    echo "[VaporFetch] Running as custom user PUID=${PUID}, PGID=${PGID}"
-    # Create or update vaporfetch group
-    if ! getent group vaporfetch >/dev/null 2>&1; then
-        groupadd -g "${PGID}" vaporfetch
+    echo "[VaporFetch] Configuring user permissions (PUID=${PUID}, PGID=${PGID})"
+    # Check if group GID already exists
+    TARGET_GROUP=$(getent group "${PGID}" | cut -d: -f1 || true)
+    if [ -z "${TARGET_GROUP}" ]; then
+        groupadd -g "${PGID}" vaporfetch 2>/dev/null || true
     fi
-    # Create or update vaporfetch user
-    if ! getent passwd vaporfetch >/dev/null 2>&1; then
-        useradd -u "${PUID}" -g "${PGID}" -d "${STEAM_DIR}" -M -s /bin/bash vaporfetch
+    # Check if user UID already exists
+    TARGET_USER=$(getent passwd "${PUID}" | cut -d: -f1 || true)
+    if [ -z "${TARGET_USER}" ]; then
+        useradd -u "${PUID}" -g "${PGID}" -d "${STEAM_DIR}" -M -s /bin/bash vaporfetch 2>/dev/null || true
     fi
 
     # Ensure ownership of /data and /downloads
-    chown "${PUID}:${PGID}" "${DATA_DIR}" "${DOWNLOADS_DIR}"
+    chown "${PUID}:${PGID}" "${DATA_DIR}" "${DOWNLOADS_DIR}" 2>/dev/null || true
     chown -R "${PUID}:${PGID}" "${STEAM_DIR}" 2>/dev/null || true
 
     # Hand off execution cleanly via gosu with tini

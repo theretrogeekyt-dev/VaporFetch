@@ -56,7 +56,7 @@ COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # 5. Create storage directories
-RUN mkdir -p /data /downloads
+RUN mkdir -p /data /downloads /root/.local/share
 
 # Expose Web UI port
 EXPOSE 8080

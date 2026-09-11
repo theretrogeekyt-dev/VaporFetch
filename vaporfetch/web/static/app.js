@@ -286,6 +286,11 @@ document.addEventListener("DOMContentLoaded", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password: password || null }),
       });
+      const data = await res.json();
+      if (!res.ok) {
+        showLoginError(data.detail || data.error || "Failed to start login.");
+        return;
+      }
       let authResult = data;
       if (authResult.status === "authenticating") {
         elements.loginSubmitBtn.textContent = "Connecting to Steam servers...";

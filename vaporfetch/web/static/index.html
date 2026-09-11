@@ -289,7 +289,7 @@
             <!-- Substep A: Credentials Form -->
             <div id="authStepCredentials">
               <p class="modal-info">
-                Sign in with your Steam account. If Steam Guard is enabled, you'll simply tap <strong>Approve</strong> on your phone.
+                Sign in to authorize both <strong>game downloads</strong> and library sync. If Steam Guard is enabled, you'll simply tap <strong>Approve</strong> on your phone.
               </p>
               <div class="form-group" style="margin-bottom: 12px;">
                 <label for="loginUsername">Steam Username</label>
@@ -359,8 +359,8 @@
               <button class="btn btn-secondary btn-sm" id="qrRefreshBtn" style="margin-top: 10px;">🔄 Refresh QR Code</button>
             </div>
             <div id="qrError" class="alert alert-error" style="display: none; margin-top: 10px;"></div>
-            <div style="font-size: 0.82em; color: var(--text-dim); text-align: center; margin-top: 10px; line-height: 1.4;">
-              Authorizes your Steam Web API profile and library sync.
+            <div class="alert alert-info" style="font-size: 0.82rem; margin-top: 12px; line-height: 1.4; text-align: left;">
+              💡 <strong>Note:</strong> QR scanning quickly syncs your game library. To download and backup games, please use the <strong>🔑 Sign In</strong> tab to authorize the SteamCMD engine.
             </div>
             <div class="modal-footer" style="margin-top: 16px;">
               <button class="btn btn-secondary" id="qrCancelBtn">Cancel</button>

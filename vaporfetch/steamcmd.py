@@ -11,6 +11,8 @@ import logging
 import urllib.request
 import urllib.parse
 import urllib.error
+import http.cookiejar
+import secrets
 from pathlib import Path
 from typing import Dict, Any, List, Set, Optional, Callable
 
@@ -339,13 +341,13 @@ def has_steamcmd_cached_credentials(username: str = "") -> bool:
                     text = cand.read_text(encoding="utf-8", errors="ignore")
                     if uname:
                         if uname in text.lower() or f'"{uname}"' in text.lower():
-                            # Check if companion config.vdf has an explicit empty RefreshToken stub
-                            cfg = base / "config" / "config.vdf"
-                            if cfg.exists():
-                                cfg_text = cfg.read_text(encoding="utf-8", errors="ignore")
-                                if re.search(rf'"{re.escape(uname)}"\s*\{{[^}}]*"RefreshToken"\s*""', cfg_text, re.IGNORECASE):
-                                    continue
-                            return True
+                                # Check if companion config.vdf has a RefreshToken stub (QR login token)
+                                cfg = base / "config" / "config.vdf"
+                                if cfg.exists():
+                                    cfg_text = cfg.read_text(encoding="utf-8", errors="ignore")
+                                    if re.search(rf'"{re.escape(uname)}"\s*\{{[^}}]*"RefreshToken"', cfg_text, re.IGNORECASE):
+                                        continue
+                                return True
                     elif "accountname" in text.lower() or "personaname" in text.lower():
                         return True
                 except Exception:
@@ -358,11 +360,11 @@ def has_steamcmd_cached_credentials(username: str = "") -> bool:
                     text = cand.read_text(encoding="utf-8", errors="ignore")
                     if uname:
                         if uname in text.lower() or f'"{uname}"' in text.lower():
-                            # If this account block has an explicit empty RefreshToken stub, ignore it
-                            if re.search(rf'"{re.escape(uname)}"\s*\{{[^}}]*"RefreshToken"\s*""', text, re.IGNORECASE):
+                            # If this account block has a RefreshToken stub (QR login token), ignore it
+                            if re.search(rf'"{re.escape(uname)}"\s*\{{[^}}]*"RefreshToken"', text, re.IGNORECASE):
                                 continue
                             return True
-                    elif '"Accounts"' in text:
+                    elif '"Accounts"' in text and '"RefreshToken"' not in text:
                         return True
                 except Exception:
                     pass
@@ -396,6 +398,54 @@ def extract_steam_id_from_token(token: str) -> str:
                 return sub
     except Exception:
         pass
+    return ""
+
+
+def finalize_steam_web_session(refresh_token: str) -> str:
+    """
+    Exchange an IAuthenticationService refresh_token for an authenticated
+    Steam Community web session cookie (steamLoginSecure).
+    Enables retrieving the user's game list via Steam Community XML even for private profiles.
+    """
+    if not refresh_token:
+        return ""
+    try:
+        cj = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+
+        session_id = secrets.token_hex(12)
+        finalize_url = "https://login.steampowered.com/jwt/finalizelogin"
+        post_data = urllib.parse.urlencode({
+            "nonce": refresh_token,
+            "sessionid": session_id,
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            finalize_url,
+            data=post_data,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        )
+        with opener.open(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        transfer_info = data.get("transfer_info", [])
+        for transfer in transfer_info:
+            t_url = transfer.get("url", "")
+            t_params = transfer.get("params", {})
+            if "steamcommunity.com" in t_url and t_params:
+                t_data = urllib.parse.urlencode(t_params).encode("utf-8")
+                t_req = urllib.request.Request(
+                    t_url,
+                    data=t_data,
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+                )
+                opener.open(t_req, timeout=10)
+
+        for cookie in cj:
+            if cookie.name == "steamLoginSecure":
+                return f"{cookie.name}={cookie.value}"
+    except Exception as e:
+        logger.debug(f"Steam web session finalization notice: {e}")
     return ""
 
 
@@ -456,6 +506,8 @@ def poll_qr_login(client_id: str, request_id: str) -> Dict[str, Any]:
                     or extract_steam_id_from_token(refresh_token)
                 )
 
+                web_cookie = finalize_steam_web_session(refresh_token)
+
                 auth_session.status = "logged_in"
                 auth_session.username = account_name
                 save_current_session(
@@ -464,6 +516,7 @@ def poll_qr_login(client_id: str, request_id: str) -> Dict[str, Any]:
                     steam_id=steam_id,
                     access_token=access_token,
                     refresh_token=refresh_token,
+                    web_cookie=web_cookie,
                     auth_method="qr",
                 )
                 write_steam_login_config(
@@ -1222,11 +1275,18 @@ def run_app_download(
 
     # Verify credentials exist before launching SteamCMD
     has_cached = has_steamcmd_cached_credentials(active_user)
-    if not session.get("logged_in") and not has_cached and not pwd:
-        err = (
-            f"Steam authentication not found for '{active_user}'. "
-            "Please click 'Login' to sign in with your Steam account."
-        )
+    if not has_cached and not pwd:
+        if session.get("auth_method") == "qr":
+            err = (
+                f"SteamCMD requires authentication to download '{active_user}'s games. "
+                "Steam Mobile QR Code only authorizes library sync. "
+                "Please click 'Account' and use 'Sign In' (Password & Steam Guard) to authorize the download engine."
+            )
+        else:
+            err = (
+                f"Steam authentication not found for '{active_user}'. "
+                "Please click 'Account' to sign in with your Steam account."
+            )
         if log_cb:
             log_cb(err)
         return {"success": False, "error": err}

@@ -443,10 +443,13 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
         if username and username != custom_id:
             comm_candidates.append(f"https://steamcommunity.com/id/{username}/games?tab=all&xml=1")
 
+        web_cookie = session.get("web_cookie", "")
         for curl in comm_candidates:
             try:
-                headers = {"User-Agent": "VaporFetch/1.0"}
-                if access_token:
+                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+                if web_cookie:
+                    headers["Cookie"] = web_cookie
+                elif access_token:
                     headers["Cookie"] = f"steamLoginSecure={steam_id}%7C%7C{access_token}"
                 req = urllib.request.Request(curl, headers=headers)
                 with urllib.request.urlopen(req, timeout=10) as resp:
@@ -462,6 +465,8 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
                                 if name:
                                     resolver.app_map[int(aid)] = name
                         if app_ids:
+                            from vaporfetch.steamcmd import log_steamcmd
+                            log_steamcmd(f"Retrieved {len(app_ids)} games from Steam Community profile.")
                             print(f"[VaporFetch] Retrieved {len(app_ids)} games via Steam Community feed for {steam_id}")
                             break
             except Exception as e:
@@ -497,6 +502,8 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
                     "Check your Steam Privacy Settings to ensure 'Game Details' are set to Public, "
                     "or sign in with Password & Steam Guard."
                 )
+            from vaporfetch.steamcmd import log_steamcmd
+            log_steamcmd(f"Notice: {error_msg}")
         else:
             # If active login is currently streaming licenses in the background, wait for it!
             if auth_session.fetching_licenses:

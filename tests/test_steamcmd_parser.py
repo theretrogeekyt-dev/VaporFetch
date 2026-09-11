@@ -465,6 +465,15 @@ class TestSteamCMDParser(unittest.TestCase):
                  patch("vaporfetch.steamcmd.DATA_DIR", tmppath):
                 self.assertFalse(has_steamcmd_cached_credentials("reaper360vr"))
 
+            # Now write QR OAuth token stub with JWT token for reaper360vr - should ALSO return False!
+            cfg_file.write_text(
+                '"InstallConfigStore" { "Software" { "Valve" { "Steam" { "Accounts" { "reaper360vr" { "SteamID" "76561199132013751" "RefreshToken" "jwt_token_12345" "AccessToken" "jwt_access" } } } } } }',
+                encoding="utf-8"
+            )
+            with patch("vaporfetch.steamcmd.Path.home", return_value=tmppath), \
+                 patch("vaporfetch.steamcmd.DATA_DIR", tmppath):
+                self.assertFalse(has_steamcmd_cached_credentials("reaper360vr"))
+
     def test_submit_2fa_code_includes_code_in_login_cmd(self):
         from unittest.mock import patch, MagicMock
         from vaporfetch.steamcmd import submit_2fa_code, auth_session

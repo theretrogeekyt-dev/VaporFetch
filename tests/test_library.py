@@ -208,6 +208,47 @@ class TestLibrary(unittest.TestCase):
             games, error = get_library_with_status(force_refresh=True)
             self.assertEqual(len(games), 0)
             mock_fetch_licenses.assert_not_called()
+
+    def test_get_library_uses_web_cookie_for_community_xml(self):
+        from unittest.mock import patch, MagicMock
+        from pathlib import Path
+        from vaporfetch.library import get_library_with_status
+        from vaporfetch.steamcmd import auth_session
+
+        auth_session.reset()
+        qr_session = {
+            "username": "reaper360vr",
+            "logged_in": True,
+            "steam_id": "76561199132013751",
+            "access_token": "mock_token",
+            "web_cookie": "steamLoginSecure=76561199132013751%7C%7Ccookie_val",
+            "auth_method": "qr",
+        }
+
+        mock_xml = b"""<gamesList>
+            <games>
+                <game>
+                    <appID>1148590</appID>
+                    <name><![CDATA[DOOM 64]]></name>
+                </game>
+            </games>
+        </gamesList>"""
+
+        mock_resp = MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.read.return_value = mock_xml
+
+        with patch("vaporfetch.library.get_current_session", return_value=qr_session), \
+             patch("vaporfetch.library.load_settings", return_value={}), \
+             patch("urllib.request.urlopen", return_value=mock_resp) as mock_urlopen, \
+             patch("vaporfetch.library.LIBRARY_CACHE_FILE", Path("/tmp/non_existent_cache_cookie.json")):
+            games, error = get_library_with_status(force_refresh=True)
+            self.assertEqual(len(games), 1)
+            self.assertEqual(games[0]["appid"], 1148590)
+            self.assertEqual(games[0]["name"], "DOOM 64")
+            # Verify the request header had the cookie
+            called_req = mock_urlopen.call_args[0][0]
+            self.assertEqual(called_req.get_header("Cookie"), "steamLoginSecure=76561199132013751%7C%7Ccookie_val")
     def test_resolve_vanity_url(self):
         import json
         from unittest.mock import patch, MagicMock

@@ -61,6 +61,21 @@ class TestDownloader(unittest.TestCase):
             self.assertFalse(res["success"])
             self.assertIn("Steam authentication not found", res["error"])
 
+    def test_run_app_download_with_qr_session_fails_fast_without_steamcmd_credentials(self):
+        from unittest.mock import patch
+        from vaporfetch.steamcmd import run_app_download, auth_session
+        auth_session.reset()
+        qr_session = {"username": "reaper360vr", "logged_in": True, "auth_method": "qr"}
+        with patch("vaporfetch.steamcmd.has_steamcmd_cached_credentials", return_value=False), \
+             patch("vaporfetch.steamcmd.get_current_session", return_value=qr_session):
+            res = run_app_download(
+                appid=2280,
+                install_dir="/downloads/DOOM + DOOM II",
+                username="reaper360vr",
+            )
+            self.assertFalse(res["success"])
+            self.assertIn("Steam Mobile QR Code only authorizes library sync", res["error"])
+
     def test_run_app_download_sanitizes_plus_in_cmd(self):
         from unittest.mock import patch, MagicMock
         from vaporfetch.steamcmd import run_app_download, auth_session

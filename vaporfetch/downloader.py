@@ -217,14 +217,25 @@ class DownloadManager:
                 continue
 
             session = get_current_session()
-            is_authenticated = bool(session.get("logged_in") and (session.get("username") or username))
-            if not is_authenticated and not has_steamcmd_cached_credentials(username):
+            auth_user = task.username or session.get("username", "")
+            has_cached = has_steamcmd_cached_credentials(auth_user)
+            has_pwd = bool(auth_session.pending_password and auth_session.username == auth_user)
+
+            if not has_cached and not has_pwd:
                 task.status = "failed"
-                task.error = "Steam login required. Please sign in via Account (Steam Mobile QR Code)."
-                self.add_log(
-                    f"Cannot download '{task.name}': Not logged in to Steam. "
-                    "Please click 'Account' and scan the QR code with your Steam Mobile App to authenticate."
-                )
+                if session.get("auth_method") == "qr":
+                    task.error = "SteamCMD login required to download. Please sign in via Account -> Sign In (Password & Steam Guard)."
+                    self.add_log(
+                        f"Cannot download '{task.name}': SteamCMD requires authentication. "
+                        "Steam Mobile QR Code only authorizes library sync; downloading requires signing in with Password & Steam Guard. "
+                        "Please click 'Account' and use 'Sign In'."
+                    )
+                else:
+                    task.error = "Steam login required. Please sign in via Account."
+                    self.add_log(
+                        f"Cannot download '{task.name}': Not logged in to Steam. "
+                        "Please click 'Account' and sign in to authenticate."
+                    )
                 with self.lock:
                     self.history.append(task)
                     self.current_task = None

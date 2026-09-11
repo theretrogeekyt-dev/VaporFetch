@@ -59,12 +59,16 @@ def save_settings(settings: Dict[str, Any]) -> None:
 
 def find_steamcmd_path() -> str:
     """Locate the steamcmd binary in system path or standard install locations."""
+    if os.path.isfile("/opt/steamcmd/steamcmd.sh") and os.access("/opt/steamcmd/steamcmd.sh", os.X_OK):
+        return "/opt/steamcmd/steamcmd.sh"
+
     custom_path = os.environ.get("STEAMCMD_PATH")
     if custom_path and os.path.isfile(custom_path) and os.access(custom_path, os.X_OK):
-        return custom_path
+        return os.path.realpath(custom_path)
 
     # Check standard system paths
     candidates = [
+        "/opt/steamcmd/steamcmd.sh",
         shutil.which("steamcmd"),
         "/usr/games/steamcmd",
         "/usr/bin/steamcmd",
@@ -74,7 +78,7 @@ def find_steamcmd_path() -> str:
     ]
     for candidate in candidates:
         if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
+            return os.path.realpath(candidate)
 
     return "steamcmd"
 

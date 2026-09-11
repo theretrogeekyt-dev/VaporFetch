@@ -9,7 +9,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANGUAGE=en_US:en \
     LC_ALL=en_US.UTF-8 \
     PYTHONUNBUFFERED=1 \
-    STEAMCMD_PATH=/usr/local/bin/steamcmd \
+    STEAMCMD_PATH=/opt/steamcmd/steamcmd.sh \
     VAPORFETCH_DATA_DIR=/data \
     VAPORFETCH_DOWNLOADS_DIR=/downloads
 
@@ -34,9 +34,10 @@ RUN dpkg --add-architecture i386 && \
 # 2. Download and install SteamCMD
 RUN mkdir -p /opt/steamcmd && \
     curl -fsSL 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz' | tar -vxz -C /opt/steamcmd && \
-    ln -s /opt/steamcmd/steamcmd.sh /usr/local/bin/steamcmd && \
+    printf '#!/bin/sh\ncd /opt/steamcmd && exec ./steamcmd.sh "$@"\n' > /usr/local/bin/steamcmd && \
+    chmod +x /usr/local/bin/steamcmd && \
     # Bootstrap SteamCMD binaries during build
-    /usr/local/bin/steamcmd +quit || true
+    /opt/steamcmd/steamcmd.sh +quit || true
 
 # 3. Create app directory and install Python dependencies
 WORKDIR /app

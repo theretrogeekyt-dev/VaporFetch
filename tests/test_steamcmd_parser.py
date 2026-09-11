@@ -400,6 +400,39 @@ class TestSteamCMDParser(unittest.TestCase):
             self.assertEqual(called_cmd[login_idx + 3], "K97XP")
             mock_save.assert_called_once()
 
+    def test_write_steam_login_config(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from vaporfetch.steamcmd import write_steam_login_config
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_data_dir = Path(tmpdir)
+            with patch("vaporfetch.steamcmd.DATA_DIR", temp_data_dir):
+                write_steam_login_config(
+                    username="reaper360vr",
+                    steam_id="76561199132013751",
+                    refresh_token="my_refresh_token_12345",
+                    access_token="my_access_token",
+                )
+
+                # Check that config.vdf was written to data/steam_home/config/config.vdf
+                steam_home_config = temp_data_dir / "steam_home" / "config" / "config.vdf"
+                self.assertTrue(steam_home_config.exists())
+                config_content = steam_home_config.read_text(encoding="utf-8")
+                self.assertIn('"AutoLoginUser"\t\t"reaper360vr"', config_content)
+                self.assertIn('"76561199132013751"', config_content)
+                self.assertIn('"RefreshToken"\t\t"my_refresh_token_12345"', config_content)
+
+                # Check that loginusers.vdf was written
+                steam_home_loginusers = temp_data_dir / "steam_home" / "config" / "loginusers.vdf"
+                self.assertTrue(steam_home_loginusers.exists())
+                loginusers_content = steam_home_loginusers.read_text(encoding="utf-8")
+                self.assertIn('"AccountName"\t\t"reaper360vr"', loginusers_content)
+                self.assertIn('"RememberPassword"\t\t"1"', loginusers_content)
+                self.assertIn('"MostRecent"\t\t"1"', loginusers_content)
+                self.assertIn('"AllowAutoLogin"\t\t"1"', loginusers_content)
+
 if __name__ == "__main__":
     unittest.main()
 

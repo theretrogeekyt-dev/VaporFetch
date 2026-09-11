@@ -45,7 +45,6 @@ document.addEventListener("DOMContentLoaded", () => {
     emptyLoginBtn: document.getElementById("emptyLoginBtn"),
     qrEmptyActions: document.getElementById("qrEmptyActions"),
     emptySettingsBtn: document.getElementById("emptySettingsBtn"),
-    emptySwitchPasswordBtn: document.getElementById("emptySwitchPasswordBtn"),
 
     // Downloads Tab
     noActiveDownload: document.getElementById("noActiveDownload"),
@@ -80,10 +79,6 @@ document.addEventListener("DOMContentLoaded", () => {
     // Modal
     authModal: document.getElementById("authModal"),
     modalCloseBtn: document.getElementById("modalCloseBtn"),
-    authModeTabs: document.getElementById("authModeTabs"),
-    authTabPassword: document.getElementById("authTabPassword"),
-    authTabQR: document.getElementById("authTabQR"),
-    authPanelPassword: document.getElementById("authPanelPassword"),
     authPanelQR: document.getElementById("authPanelQR"),
     qrLoading: document.getElementById("qrLoading"),
     qrImage: document.getElementById("qrImage"),
@@ -91,20 +86,7 @@ document.addEventListener("DOMContentLoaded", () => {
     qrRefreshBtn: document.getElementById("qrRefreshBtn"),
     qrError: document.getElementById("qrError"),
     qrCancelBtn: document.getElementById("qrCancelBtn"),
-    loginStepCredentials: document.getElementById("loginStepCredentials"),
-    loginStep2FA: document.getElementById("loginStep2FA"),
     loginStepSuccess: document.getElementById("loginStepSuccess"),
-    loginUsername: document.getElementById("loginUsername"),
-    loginPassword: document.getElementById("loginPassword"),
-    loginSteamGuard: document.getElementById("loginSteamGuard"),
-    loginError: document.getElementById("loginError"),
-    loginSubmitBtn: document.getElementById("loginSubmitBtn"),
-    loginCancelBtn: document.getElementById("loginCancelBtn"),
-    twoFactorCode: document.getElementById("twoFactorCode"),
-    twoFactorPromptText: document.getElementById("twoFactorPromptText"),
-    twoFactorError: document.getElementById("twoFactorError"),
-    twoFactorSubmitBtn: document.getElementById("twoFactorSubmitBtn"),
-    twoFactorCancelBtn: document.getElementById("twoFactorCancelBtn"),
     loginDoneBtn: document.getElementById("loginDoneBtn"),
     logoutBtn: document.getElementById("logoutBtn"),
     authStatusAlert: document.getElementById("authStatusAlert"),
@@ -113,8 +95,6 @@ document.addEventListener("DOMContentLoaded", () => {
     authSteamIdDisplay: document.getElementById("authSteamIdDisplay"),
     authWebStatus: document.getElementById("authWebStatus"),
     authSteamCmdStatus: document.getElementById("authSteamCmdStatus"),
-    authSteamCmdMissingNotice: document.getElementById("authSteamCmdMissingNotice"),
-    linkSteamCmdBtn: document.getElementById("linkSteamCmdBtn"),
     libraryErrorBanner: document.getElementById("libraryErrorBanner"),
     libraryErrorText: document.getElementById("libraryErrorText"),
     viewLogsBtn: document.getElementById("viewLogsBtn"),
@@ -172,7 +152,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (session && session.logged_in && session.username) {
       state.user = session;
       elements.userName.textContent = session.username;
-      elements.authBtn.textContent = session.has_steamcmd_auth ? "Account" : "Account (Web Only)";
+      elements.authBtn.textContent = `Account: ${session.username}`;
       elements.authBtn.classList.remove("btn-outline");
       elements.authBtn.classList.add("btn-secondary");
     } else {
@@ -253,7 +233,7 @@ document.addEventListener("DOMContentLoaded", () => {
       openAuthModal();
     });
 
-    elements.emptyLoginBtn.addEventListener("click", () => {
+    elements.emptyLoginBtn?.addEventListener("click", () => {
       openAuthModal();
     });
 
@@ -262,115 +242,37 @@ document.addEventListener("DOMContentLoaded", () => {
       elements.settingApiKey?.focus();
     });
 
-    elements.emptySwitchPasswordBtn?.addEventListener("click", () => {
-      openAuthModal();
-      elements.authTabPassword?.click();
-    });
-
-    elements.modalCloseBtn.addEventListener("click", closeAuthModal);
-    elements.loginCancelBtn.addEventListener("click", closeAuthModal);
-    elements.twoFactorCancelBtn.addEventListener("click", closeAuthModal);
-
-    elements.loginSubmitBtn.addEventListener("click", handleLoginSubmit);
-    elements.twoFactorSubmitBtn.addEventListener("click", handle2FASubmit);
-
-    // Auth Mode Tabs (Password vs QR Code)
-    elements.authTabPassword?.addEventListener("click", () => {
-      elements.authTabPassword.classList.add("active");
-      elements.authTabQR.classList.remove("active");
-      elements.authPanelPassword.style.display = "block";
-      elements.authPanelQR.style.display = "none";
-      stopQRPolling();
-    });
-
-    elements.authTabQR?.addEventListener("click", () => {
-      elements.authTabQR.classList.add("active");
-      elements.authTabPassword.classList.remove("active");
-      elements.authPanelQR.style.display = "block";
-      elements.authPanelPassword.style.display = "none";
-      startQRLogin();
-    });
-
-    elements.qrRefreshBtn?.addEventListener("click", startQRLogin);
+    elements.modalCloseBtn?.addEventListener("click", closeAuthModal);
     elements.qrCancelBtn?.addEventListener("click", closeAuthModal);
+    elements.qrRefreshBtn?.addEventListener("click", startQRLogin);
 
-    if (elements.loginSteamGuard) {
-      elements.loginSteamGuard.addEventListener("input", (e) => {
-        e.target.value = e.target.value.toUpperCase();
-      });
-      elements.loginSteamGuard.addEventListener("keypress", (e) => {
-        if (e.key === "Enter") handleLoginSubmit();
-      });
-    }
-
-    elements.twoFactorCode.addEventListener("input", (e) => {
-      e.target.value = e.target.value.toUpperCase();
-      if (e.target.value.trim().length === 5) {
-        handle2FASubmit();
-      }
-    });
-    elements.twoFactorCode.addEventListener("keypress", (e) => {
-      if (e.key === "Enter") handle2FASubmit();
-    });
-
-    elements.loginDoneBtn.addEventListener("click", () => {
+    elements.loginDoneBtn?.addEventListener("click", () => {
       closeAuthModal();
       fetchLibrary();
     });
 
-    elements.linkSteamCmdBtn?.addEventListener("click", () => {
-      openAuthModal(true);
-    });
-
-    elements.logoutBtn.addEventListener("click", handleLogout);
+    elements.logoutBtn?.addEventListener("click", handleLogout);
   }
 
-  function openAuthModal(preferPassword = false) {
+  function openAuthModal() {
     elements.authModal.style.display = "flex";
-    elements.loginError.style.display = "none";
-    elements.twoFactorError.style.display = "none";
     if (elements.qrError) elements.qrError.style.display = "none";
     stopQRPolling();
 
-    if (state.user && state.user.logged_in && !preferPassword) {
-      if (elements.authModeTabs) elements.authModeTabs.style.display = "none";
-      if (elements.authPanelPassword) elements.authPanelPassword.style.display = "none";
+    if (state.user && state.user.logged_in) {
       if (elements.authPanelQR) elements.authPanelQR.style.display = "none";
-      elements.loginStepSuccess.style.display = "block";
+      if (elements.loginStepSuccess) elements.loginStepSuccess.style.display = "block";
 
       if (elements.authUsernameDisplay) elements.authUsernameDisplay.textContent = state.user.username || "-";
       if (elements.authSteamIdDisplay) elements.authSteamIdDisplay.textContent = state.user.steam_id || "Auto-detected";
-      if (elements.authWebStatus) elements.authWebStatus.textContent = state.user.auth_method === "qr" ? "Active (QR Code)" : "Active (Web API)";
-
-      if (state.user.has_steamcmd_auth) {
-        if (elements.authSteamCmdStatus) elements.authSteamCmdStatus.innerHTML = "<span style='color: #48bb78;'>✅ Active & Ready</span>";
-        if (elements.authSteamCmdMissingNotice) elements.authSteamCmdMissingNotice.style.display = "none";
-        if (elements.linkSteamCmdBtn) elements.linkSteamCmdBtn.style.display = "none";
-        if (elements.authStatusAlert) elements.authStatusAlert.className = "alert alert-success";
-        if (elements.authStatusText) elements.authStatusText.textContent = "✅ Fully Authenticated (SteamCMD ready for downloads)";
-      } else {
-        if (elements.authSteamCmdStatus) elements.authSteamCmdStatus.innerHTML = "<span style='color: #ecc94b;'>⚠️ Not Authenticated</span>";
-        if (elements.authSteamCmdMissingNotice) elements.authSteamCmdMissingNotice.style.display = "block";
-        if (elements.linkSteamCmdBtn) elements.linkSteamCmdBtn.style.display = "inline-flex";
-        if (elements.authStatusAlert) elements.authStatusAlert.className = "alert alert-info";
-        if (elements.authStatusText) elements.authStatusText.textContent = "ℹ️ Signed in via QR (Web API only)";
-      }
+      if (elements.authWebStatus) elements.authWebStatus.innerHTML = "<span style='color: #48bb78; font-weight: 600;'>✅ Connected</span>";
+      if (elements.authSteamCmdStatus) elements.authSteamCmdStatus.innerHTML = "<span style='color: #48bb78; font-weight: 600;'>✅ Active &amp; Ready</span>";
+      if (elements.authStatusAlert) elements.authStatusAlert.className = "alert alert-success";
+      if (elements.authStatusText) elements.authStatusText.textContent = `✅ Signed in as ${state.user.username}`;
     } else {
-      if (elements.authModeTabs) elements.authModeTabs.style.display = "flex";
-      if (elements.authTabPassword) elements.authTabPassword.classList.add("active");
-      if (elements.authTabQR) elements.authTabQR.classList.remove("active");
-      if (elements.authPanelPassword) elements.authPanelPassword.style.display = "block";
-      if (elements.authPanelQR) elements.authPanelQR.style.display = "none";
-      elements.loginStepCredentials.style.display = "block";
-      elements.loginStep2FA.style.display = "none";
-      elements.loginStepSuccess.style.display = "none";
-      if (elements.loginSteamGuard) elements.loginSteamGuard.value = "";
-      if (state.user && state.user.username) {
-        elements.loginUsername.value = state.user.username;
-        elements.loginPassword.focus();
-      } else {
-        elements.loginUsername.focus();
-      }
+      if (elements.loginStepSuccess) elements.loginStepSuccess.style.display = "none";
+      if (elements.authPanelQR) elements.authPanelQR.style.display = "block";
+      startQRLogin();
     }
   }
 
@@ -379,7 +281,7 @@ document.addEventListener("DOMContentLoaded", () => {
     elements.authModal.style.display = "none";
   }
 
-  // --- QR Code Login ---
+  // --- Steam Mobile QR Code Login ---
   let qrPollTimer = null;
 
   async function startQRLogin() {
@@ -438,10 +340,10 @@ document.addEventListener("DOMContentLoaded", () => {
       } else if (data.status === "logged_in") {
         stopQRPolling();
         elements.qrStatusText.textContent = "✅ Signed in successfully!";
-        elements.authPanelQR.style.display = "none";
-        if (elements.authModeTabs) elements.authModeTabs.style.display = "none";
-        elements.loginStepSuccess.style.display = "block";
-        fetchInitialStatus();
+        if (elements.authPanelQR) elements.authPanelQR.style.display = "none";
+        if (elements.loginStepSuccess) elements.loginStepSuccess.style.display = "block";
+        await fetchInitialStatus();
+        fetchLibrary(true);
       } else if (data.status === "expired") {
         stopQRPolling();
         showQRError("QR code expired. Click Refresh to generate a new code.");
@@ -466,110 +368,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!elements.qrError) return;
     elements.qrError.textContent = msg;
     elements.qrError.style.display = "block";
-  }
-
-  async function handleLoginSubmit() {
-    const username = elements.loginUsername.value.trim();
-    const password = elements.loginPassword.value;
-    const code = elements.loginSteamGuard ? elements.loginSteamGuard.value.trim() : "";
-
-    if (!username) {
-      showLoginError("Please enter your Steam username.");
-      return;
-    }
-
-    elements.loginSubmitBtn.disabled = true;
-    elements.loginSubmitBtn.textContent = "Connecting to SteamCMD...";
-    elements.loginError.style.display = "none";
-
-    try {
-      const res = await fetch("/api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password: password || null, code: code || null }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        showLoginError(data.detail || data.error || "Failed to start login.");
-        return;
-      }
-      let authResult = data;
-      if (authResult.status === "authenticating") {
-        elements.loginSubmitBtn.textContent = "Connecting to Steam servers...";
-        for (let i = 0; i < 45; i++) {
-          await new Promise((r) => setTimeout(r, 1000));
-          const checkRes = await fetch("/api/login/status");
-          if (checkRes.ok) {
-            const checkData = await checkRes.json();
-            if (checkData.status && checkData.status !== "authenticating") {
-              authResult = checkData;
-              break;
-            }
-          }
-        }
-      }
-
-      if (authResult.status === "awaiting_2fa") {
-        elements.loginStepCredentials.style.display = "none";
-        elements.loginStep2FA.style.display = "block";
-        elements.twoFactorPromptText.textContent = authResult.prompt || "Enter Steam Guard code";
-        elements.twoFactorCode.value = "";
-        elements.twoFactorCode.focus();
-      } else if (authResult.status === "logged_in") {
-        elements.loginStepCredentials.style.display = "none";
-        elements.loginStepSuccess.style.display = "block";
-        fetchInitialStatus();
-      } else {
-        showLoginError(authResult.error || "Login failed. Please verify credentials.");
-      }
-    } catch (e) {
-      showLoginError(`Network error: ${e.message}`);
-    } finally {
-      elements.loginSubmitBtn.disabled = false;
-      elements.loginSubmitBtn.textContent = "Sign In";
-    }
-  }
-
-  function showLoginError(msg) {
-    elements.loginError.textContent = msg;
-    elements.loginError.style.display = "block";
-  }
-
-  async function handle2FASubmit() {
-    const code = elements.twoFactorCode.value.trim();
-    if (!code) {
-      elements.twoFactorError.textContent = "Please enter the code.";
-      elements.twoFactorError.style.display = "block";
-      return;
-    }
-
-    elements.twoFactorSubmitBtn.disabled = true;
-    elements.twoFactorSubmitBtn.textContent = "Verifying...";
-    elements.twoFactorError.style.display = "none";
-
-    try {
-      const res = await fetch("/api/login/2fa", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
-      const data = await res.json();
-
-      if (data.status === "logged_in") {
-        elements.loginStep2FA.style.display = "none";
-        elements.loginStepSuccess.style.display = "block";
-        fetchInitialStatus();
-      } else {
-        elements.twoFactorError.textContent = data.error || "Invalid 2FA code.";
-        elements.twoFactorError.style.display = "block";
-      }
-    } catch (e) {
-      elements.twoFactorError.textContent = `Error: ${e.message}`;
-      elements.twoFactorError.style.display = "block";
-    } finally {
-      elements.twoFactorSubmitBtn.disabled = false;
-      elements.twoFactorSubmitBtn.textContent = "Verify & Sign In";
-    }
   }
 
   async function handleLogout() {
@@ -685,41 +483,28 @@ document.addEventListener("DOMContentLoaded", () => {
     elements.gamesEmpty.classList.remove("hidden");
 
     if (state.user && state.user.logged_in) {
-      if (state.user.auth_method === "qr" && !state.user.has_api_key) {
-        if (elements.emptyTitle) elements.emptyTitle.textContent = "📱 Steam QR Code Login Active";
-        if (elements.emptySubtitle) {
+      if (elements.emptyTitle) elements.emptyTitle.textContent = "No Games Detected";
+      if (elements.emptySubtitle) {
+        if (lastSyncError) {
           elements.emptySubtitle.innerHTML =
-            "You are signed in via Steam Mobile QR Code! Valve's Web API requires a free Steam Web API Key to view your private library, or you can sign in with Password & 2FA to let SteamCMD sync your library directly.";
-        }
-        if (elements.qrEmptyActions) elements.qrEmptyActions.style.display = "flex";
-        if (elements.emptyLoginBtn) elements.emptyLoginBtn.style.display = "none";
-      } else {
-        if (elements.emptyTitle) elements.emptyTitle.textContent = "No Games Detected";
-        if (elements.emptySubtitle) {
-          if (lastSyncError) {
-            elements.emptySubtitle.innerHTML =
-              `<span style="color: #f87171; font-weight: 500; font-size: 1rem;">⚠️ ${escapeHtml(lastSyncError)}</span><br><br>` +
-              "Click 'Re-authenticate with Steam' below to enter your Steam credentials, or view 'SteamCMD Logs' in the top bar to inspect output.";
-          } else {
-            elements.emptySubtitle.textContent =
-              "No owned games detected. Click 'Sync Steam Library' above to refresh licenses from SteamCMD, or add an AppID manually.";
-          }
-        }
-        if (elements.qrEmptyActions) elements.qrEmptyActions.style.display = "none";
-        if (elements.emptyLoginBtn) {
-          elements.emptyLoginBtn.textContent = "Re-authenticate with Steam";
-          elements.emptyLoginBtn.style.display = "inline-block";
+            `<span style="color: #f87171; font-weight: 500; font-size: 1rem;">⚠️ ${escapeHtml(lastSyncError)}</span><br><br>` +
+            "Tip: Ensure your Steam Privacy Settings have <strong>'Game Details' set to Public</strong>, or configure your <strong>Steam Web API Key &amp; Vanity URL</strong> in Settings.";
+        } else {
+          elements.emptySubtitle.innerHTML =
+            "No games found in this library view. Click <strong>'Sync Steam Library'</strong> above, or add your <strong>Steam Web API Key &amp; Custom URL</strong> in Settings.";
         }
       }
+      if (elements.qrEmptyActions) elements.qrEmptyActions.style.display = "flex";
+      if (elements.emptyLoginBtn) elements.emptyLoginBtn.style.display = "none";
     } else {
       if (elements.emptyTitle) elements.emptyTitle.textContent = "No Games Found";
       if (elements.emptySubtitle) {
         elements.emptySubtitle.textContent =
-          "Log in with your Steam account to discover and backup your game library.";
+          "Log in with your Steam Mobile App to discover and backup your game library.";
       }
       if (elements.qrEmptyActions) elements.qrEmptyActions.style.display = "none";
       if (elements.emptyLoginBtn) {
-        elements.emptyLoginBtn.textContent = "Log in to Steam";
+        elements.emptyLoginBtn.textContent = "Log in with Steam Mobile";
         elements.emptyLoginBtn.style.display = "inline-block";
       }
     }
@@ -819,16 +604,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function checkSteamCmdAuthBeforeDownload() {
-    if (state.user && state.user.logged_in && !state.user.has_steamcmd_auth) {
-      const confirmAuth = confirm(
-        "Notice: You are currently signed in via Steam QR Code (Web API).\n\n" +
-        "Valve requires an authenticated SteamCMD session (Password & Steam Guard) to download game files.\n\n" +
-        "Would you like to enter your Password & Steam Guard now to link download credentials?"
-      );
-      if (confirmAuth) {
-        openAuthModal(true);
-        return false;
-      }
+    if (!state.user || !state.user.logged_in) {
+      alert("Please log in with your Steam Mobile App first to start backups.");
+      openAuthModal();
+      return false;
     }
     return true;
   }

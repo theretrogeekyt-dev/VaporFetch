@@ -180,8 +180,104 @@ def save_current_session(username: str, logged_in: bool = True, steam_id: str = 
         json.dump(data, f, indent=2)
 
 
+def write_steam_login_config(
+    username: str,
+    steam_id: str = "",
+    refresh_token: str = "",
+    access_token: str = "",
+) -> None:
+    """
+    Write authenticated session metadata to Steam configuration files (config.vdf and loginusers.vdf)
+    across all standard Steam directories, enabling SteamCMD to use the authenticated session.
+    """
+    if not username:
+        return
+
+    search_dirs = [
+        DATA_DIR / "steam_home",
+        DATA_DIR / "steam_root",
+        DATA_DIR / "steam_share",
+        Path.home() / "Steam",
+        Path.home() / ".steam",
+        Path.home() / ".steam" / "steam",
+        Path.home() / ".local" / "share" / "Steam",
+        Path("/opt/steamcmd"),
+    ]
+
+    timestamp = int(time.time())
+    sid_entry = steam_id or "0"
+
+    loginusers_content = f""""users"
+{{
+\t"{sid_entry}"
+\t{{
+\t\t"AccountName"\t\t"{username}"
+\t\t"PersonaName"\t\t"{username}"
+\t\t"RememberPassword"\t\t"1"
+\t\t"MostRecent"\t\t"1"
+\t\t"Timestamp"\t\t"{timestamp}"
+\t\t"WantsOfflineMode"\t\t"0"
+\t\t"AllowAutoLogin"\t\t"1"
+\t}}
+}}
+"""
+
+    config_content = f""""InstallConfigStore"
+{{
+\t"Software"
+\t{{
+\t\t"Valve"
+\t\t{{
+\t\t\t"Steam"
+\t\t\t{{
+\t\t\t\t"AutoLoginUser"\t\t"{username}"
+\t\t\t\t"RememberPassword"\t\t"1"
+\t\t\t\t"Accounts"
+\t\t\t\t{{
+\t\t\t\t\t"{username}"
+\t\t\t\t\t{{
+\t\t\t\t\t\t"SteamID"\t\t"{steam_id or ''}"
+\t\t\t\t\t\t"RefreshToken"\t\t"{refresh_token or ''}"
+\t\t\t\t\t\t"AccessToken"\t\t"{access_token or ''}"
+\t\t\t\t\t}}
+\t\t\t\t}}
+\t\t\t}}
+\t\t}}
+\t}}
+}}
+"""
+
+    for base in search_dirs:
+        try:
+            cfg_dir = base / "config"
+            cfg_dir.mkdir(parents=True, exist_ok=True)
+
+            loginusers_file = cfg_dir / "loginusers.vdf"
+            loginusers_file.write_text(loginusers_content, encoding="utf-8")
+
+            config_file = cfg_dir / "config.vdf"
+            config_file.write_text(config_content, encoding="utf-8")
+
+            if steam_id and steam_id.isdigit() and len(steam_id) >= 16:
+                try:
+                    acc_id = int(steam_id) - 76561197960265728
+                    if acc_id > 0:
+                        ud = base / "userdata" / str(acc_id)
+                        ud.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug(f"Could not write Steam config in {base}: {e}")
+
+
 def has_steamcmd_cached_credentials(username: str = "") -> bool:
-    """Check if SteamCMD has existing cached login tokens on disk for username."""
+    """Check if SteamCMD has existing cached login tokens on disk or active session for username."""
+    session = get_current_session()
+    uname = username.strip().lower() if username else ""
+    if session.get("logged_in") and session.get("username"):
+        if not uname or uname == session.get("username", "").lower():
+            return True
+
     search_dirs = [
         Path.home() / "Steam",
         Path.home() / ".steam",
@@ -192,7 +288,6 @@ def has_steamcmd_cached_credentials(username: str = "") -> bool:
         DATA_DIR / "steam_root",
         DATA_DIR / "steam_share",
     ]
-    uname = username.strip().lower() if username else ""
     for base in search_dirs:
         # 1. Check loginusers.vdf
         for cand in [base / "config" / "loginusers.vdf", base / "loginusers.vdf"]:
@@ -319,6 +414,13 @@ def poll_qr_login(client_id: str, request_id: str) -> Dict[str, Any]:
                     refresh_token=refresh_token,
                     auth_method="qr",
                 )
+                write_steam_login_config(
+                    username=account_name,
+                    steam_id=steam_id,
+                    refresh_token=refresh_token,
+                    access_token=access_token,
+                )
+                log_steamcmd(f"Steam Mobile QR authentication successful for '{account_name}' (SteamID: {steam_id}).")
                 return {
                     "status": "logged_in",
                     "username": account_name,
@@ -869,29 +971,36 @@ def run_app_download(
     Download or backup a Steam game using SteamCMD app_update.
     Streams live progress and log output via callbacks.
     """
-    steamcmd_bin = find_steamcmd_path()
-    pwd = auth_session.pending_password if auth_session.username == username else None
+    session = get_current_session()
+    active_user = username or session.get("username", "")
 
     # Verify credentials exist before launching SteamCMD
-    if not pwd and not has_steamcmd_cached_credentials(username):
+    if not session.get("logged_in") and not has_steamcmd_cached_credentials(active_user) and not auth_session.pending_password:
         err = (
-            f"SteamCMD credentials not found for '{username}'. "
-            "Valve requires an authenticated SteamCMD session (Password & Steam Guard) to download game files. "
-            "Please click 'Account' and sign in once with Password & Steam Guard."
+            f"Steam authentication not found for '{active_user}'. "
+            "Please click 'Login' and scan the QR code with your Steam Mobile App."
         )
         if log_cb:
             log_cb(err)
         return {"success": False, "error": err}
 
+    # Ensure Steam configuration files exist for the user
+    if session.get("logged_in") and active_user:
+        write_steam_login_config(
+            username=active_user,
+            steam_id=session.get("steam_id", ""),
+            refresh_token=session.get("refresh_token", ""),
+            access_token=session.get("access_token", ""),
+        )
+
     # Ensure install_dir does not contain '+' which breaks SteamCMD CLI parameter parsing
     safe_install_dir = re.sub(r'\+', '_', install_dir)
+    steamcmd_bin = find_steamcmd_path()
     cmd = [
         steamcmd_bin,
         "+force_install_dir", safe_install_dir,
-        "+login", username,
+        "+login", active_user,
     ]
-    if pwd and re.match(r'^[A-Za-z0-9_]+$', pwd):
-        cmd.append(pwd)
 
     if platform and platform.lower() in ("windows", "linux", "macos"):
         cmd.extend(["+@sSteamCmdForcePlatformType", platform.lower()])

@@ -59,7 +59,7 @@ class TestDownloader(unittest.TestCase):
                 username="reaper360vr",
             )
             self.assertFalse(res["success"])
-            self.assertIn("SteamCMD credentials not found", res["error"])
+            self.assertIn("Steam authentication not found", res["error"])
 
     def test_run_app_download_sanitizes_plus_in_cmd(self):
         from unittest.mock import patch, MagicMock

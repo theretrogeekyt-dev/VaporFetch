@@ -126,8 +126,7 @@
             <p id="emptySubtitle">Log in with your Steam account to discover and backup your game library.</p>
             <button class="btn btn-primary" id="emptyLoginBtn">Log in to Steam</button>
             <div id="qrEmptyActions" style="display: none; margin-top: 14px; gap: 10px; justify-content: center; flex-wrap: wrap;">
-              <button class="btn btn-primary" id="emptySettingsBtn">⚙️ Add Free Steam API Key</button>
-              <button class="btn btn-secondary" id="emptySwitchPasswordBtn">🔑 Sign In with Password & 2FA</button>
+              <button class="btn btn-primary" id="emptySettingsBtn">⚙️ Configure API Key / Profile</button>
             </div>
           </div>
           <div class="games-grid" id="gamesGrid">
@@ -271,112 +270,62 @@
     <div class="modal-overlay" id="authModal" style="display: none;">
       <div class="modal-card">
         <div class="modal-header">
-          <h3 id="modalTitle">🔑 Steam Account Login</h3>
+          <h3 id="modalTitle">📱 Steam Account Login</h3>
           <button class="modal-close" id="modalCloseBtn">&times;</button>
         </div>
 
         <div class="modal-body">
-          <!-- Auth Mode Selection Tabs -->
-          <div class="auth-mode-tabs" id="authModeTabs">
-            <button class="auth-mode-tab active" id="authTabPassword" type="button">🔑 Password & 2FA</button>
-            <button class="auth-mode-tab" id="authTabQR" type="button">📱 Steam QR Code</button>
-          </div>
-
-          <!-- Mode 1: Password & Steam Guard -->
-          <div id="authPanelPassword">
-            <!-- Step 1: Username & Password -->
-            <div id="loginStepCredentials">
-              <p class="modal-info">Log into your Steam account through SteamCMD to browse and backup your owned games.</p>
-              <div class="form-group">
-                <label for="loginUsername">Steam Account Username:</label>
-                <input type="text" id="loginUsername" class="text-input" placeholder="e.g. reaper360vr" required autocomplete="username">
-                <small class="form-hint">Must be your Steam <strong>account login name</strong> (e.g. <code>reaper360vr</code>), NOT your display name or vanity URL.</small>
-              </div>
-              <div class="form-group">
-                <label for="loginPassword">Steam Password:</label>
-                <input type="password" id="loginPassword" class="text-input" placeholder="Password" autocomplete="current-password">
-                <small class="form-hint">Password is submitted interactively (all special characters including <code>!@#$%^&amp;*+</code> supported).</small>
-              </div>
-              <div class="form-group">
-                <label for="loginSteamGuard">Steam Guard Code (Optional / Faster Login):</label>
-                <input type="text" id="loginSteamGuard" class="text-input code-input" placeholder="e.g. R4NDM" maxlength="10" autocomplete="off">
-                <small class="form-hint">Have your Steam Mobile App open? Enter the 5-digit code here to sign in instantly before it expires!</small>
-              </div>
-              <div id="loginError" class="alert alert-error" style="display: none;"></div>
-              <div class="modal-footer">
-                <button class="btn btn-secondary" id="loginCancelBtn">Cancel</button>
-                <button class="btn btn-primary" id="loginSubmitBtn">Sign In</button>
-              </div>
-            </div>
-
-            <!-- Step 2: Steam Guard 2FA Prompt -->
-            <div id="loginStep2FA" style="display: none;">
-              <div class="alert alert-info">
-                <span class="alert-icon">🛡️</span>
-                <span id="twoFactorPromptText">Enter Steam Guard 2FA Code</span>
-              </div>
-              <div class="form-group">
-                <label for="twoFactorCode">Steam Guard Code:</label>
-                <input type="text" id="twoFactorCode" class="text-input code-input" placeholder="e.g. R4NDM" maxlength="10" autofocus>
-                <small class="form-hint">Tip: If the code on your phone is about to expire, wait 2–3 seconds for a fresh code, then enter it.</small>
-              </div>
-              <div id="twoFactorError" class="alert alert-error" style="display: none;"></div>
-              <div class="modal-footer">
-                <button class="btn btn-secondary" id="twoFactorCancelBtn">Cancel</button>
-                <button class="btn btn-primary" id="twoFactorSubmitBtn">Verify & Sign In</button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Mode 2: Steam Mobile QR Code -->
-          <div id="authPanelQR" style="display: none;">
-            <p class="modal-info">Open the <strong>Steam Mobile App</strong> on your phone, tap <strong>Steam Guard</strong>, and scan the QR code below.</p>
+          <!-- Step 1: Steam Mobile QR Code Scan -->
+          <div id="authPanelQR">
+            <p class="modal-info">
+              Open the <strong>Steam Mobile App</strong> on your phone, tap <strong>Steam Guard</strong> (center shield icon), then tap <strong>Scan QR code</strong>.
+            </p>
             <div class="qr-container">
-              <div id="qrLoading" class="qr-loading">Generating secure QR code from Steam...</div>
+              <div id="qrLoading" class="qr-loading">
+                <div class="spinner" style="margin: 0 auto 12px;"></div>
+                Connecting to Steam authentication service...
+              </div>
               <img id="qrImage" class="qr-image" style="display: none;" alt="Steam Login QR Code" />
-              <div id="qrStatusText" class="qr-status-text">Waiting for scan...</div>
-              <button class="btn btn-secondary btn-sm" id="qrRefreshBtn" style="margin-top: 8px;">🔄 Refresh QR Code</button>
+              <div id="qrStatusText" class="qr-status-text">Waiting for QR code...</div>
+              <button class="btn btn-secondary btn-sm" id="qrRefreshBtn" style="margin-top: 10px;">🔄 Refresh QR Code</button>
             </div>
             <div id="qrError" class="alert alert-error" style="display: none; margin-top: 10px;"></div>
-            <div class="modal-footer">
+            <div style="font-size: 0.85em; color: var(--text-dim); text-align: center; margin-top: 10px; line-height: 1.4;">
+              Scanning the QR code authorizes both your <strong>Steam Web API library sync</strong> and your <strong>SteamCMD download engine</strong>. No passwords or code typing required.
+            </div>
+            <div class="modal-footer" style="margin-top: 16px;">
               <button class="btn btn-secondary" id="qrCancelBtn">Cancel</button>
             </div>
           </div>
 
-          <!-- Step 3: Authenticated State -->
+          <!-- Step 2: Authenticated State -->
           <div id="loginStepSuccess" style="display: none;">
             <div id="authStatusAlert" class="alert alert-success">
-              <span id="authStatusText">✅ Logged in successfully!</span>
+              <span id="authStatusText">✅ Signed in to Steam</span>
             </div>
             
-            <div id="authDetailsBox" style="margin: 14px 0; font-size: 0.9em; background: var(--color-bg-secondary, #1a202c); padding: 14px; border-radius: 6px; border: 1px solid var(--color-border, #2d3748);">
+            <div id="authDetailsBox" style="margin: 14px 0; font-size: 0.9em; background: #0b111e; padding: 14px; border-radius: 6px; border: 1px solid var(--border-color);">
               <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                <span style="color: var(--color-text-muted, #a0aec0);">Account:</span>
+                <span style="color: var(--text-muted);">Account:</span>
                 <strong id="authUsernameDisplay">-</strong>
               </div>
               <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                <span style="color: var(--color-text-muted, #a0aec0);">SteamID:</span>
+                <span style="color: var(--text-muted);">SteamID:</span>
                 <code id="authSteamIdDisplay">-</code>
               </div>
               <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                <span style="color: var(--color-text-muted, #a0aec0);">Web API Library:</span>
-                <span id="authWebStatus">Connected</span>
+                <span style="color: var(--text-muted);">SteamCMD Engine:</span>
+                <span id="authSteamCmdStatus"><span style="color: #48bb78; font-weight: 600;">✅ Active &amp; Ready</span></span>
               </div>
               <div style="display: flex; justify-content: space-between;">
-                <span style="color: var(--color-text-muted, #a0aec0);">SteamCMD Downloads:</span>
-                <span id="authSteamCmdStatus">Checking...</span>
+                <span style="color: var(--text-muted);">Library Sync:</span>
+                <span id="authWebStatus"><span style="color: #48bb78; font-weight: 600;">✅ Connected</span></span>
               </div>
             </div>
 
-            <div id="authSteamCmdMissingNotice" class="alert alert-warning" style="display: none; font-size: 0.88em; margin-bottom: 14px;">
-              <span>⚠️ <strong>SteamCMD Login Required for Game Downloads</strong><br>
-              QR code sign-in enables library browsing via Web API, but Valve requires an authenticated SteamCMD session with Password &amp; Steam Guard to download game files.</span>
-            </div>
-
-            <div class="modal-footer" style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <button class="btn btn-primary" id="linkSteamCmdBtn" style="display: none;">🔑 Link SteamCMD (Password &amp; 2FA)</button>
-              <button class="btn btn-secondary" id="loginDoneBtn">Close</button>
+            <div class="modal-footer" style="display: flex; justify-content: space-between; gap: 8px;">
               <button class="btn btn-danger" id="logoutBtn">Log Out</button>
+              <button class="btn btn-primary" id="loginDoneBtn">Done</button>
             </div>
           </div>
 
@@ -386,7 +335,7 @@
 
   </div>
 
-  <script src="/static/app.js?v=1.0.4"></script>
+  <script src="/static/app.js?v=1.0.5"></script>
 </body>
 </html>
 

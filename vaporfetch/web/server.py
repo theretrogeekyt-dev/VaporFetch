@@ -100,16 +100,15 @@ if FastAPI is not None:
         settings = load_settings()
         api_key = settings.get("steam_api_key") or settings.get("api_key") or os.environ.get("STEAM_API_KEY", "")
         session["has_api_key"] = bool(api_key)
-        session["auth_method"] = session.get("auth_method", "steamcmd")
+        session["auth_method"] = session.get("auth_method", "qr")
         username = session.get("username", "")
-        has_pwd = bool(auth_session.pending_password and auth_session.username == username)
-        session["has_steamcmd_auth"] = bool(has_pwd or has_steamcmd_cached_credentials(username))
+        session["has_steamcmd_auth"] = bool(session.get("logged_in") and username)
         return {
             "session": session,
             "auth_state": {
-                "status": auth_session.status,
-                "prompt": auth_session.prompt_message,
-                "error": auth_session.error_message,
+                "status": "logged_in" if session.get("logged_in") else "idle",
+                "prompt": "",
+                "error": "",
             },
             "queue_state": manager.get_queue_state(),
             "storage": get_storage_stats(),
@@ -117,8 +116,9 @@ if FastAPI is not None:
 
     @app.get("/api/login/status")
     async def login_status_endpoint():
+        session = get_current_session()
         return {
-            "status": auth_session.status,
+            "status": "logged_in" if session.get("logged_in") else auth_session.status,
             "prompt": auth_session.prompt_message,
             "error": auth_session.error_message,
             "two_factor_type": auth_session.two_factor_type,
@@ -126,17 +126,11 @@ if FastAPI is not None:
 
     @app.post("/api/login")
     async def login_endpoint(payload: LoginRequest):
-        if not payload.username:
-            raise HTTPException(status_code=400, detail="Username is required")
-        result = start_login(payload.username.strip(), payload.password, payload.code)
-        return result
+        return {"status": "qr_required", "message": "Please sign in using Steam Mobile QR Code."}
 
     @app.post("/api/login/2fa")
     async def two_factor_endpoint(payload: TwoFactorRequest):
-        if not payload.code:
-            raise HTTPException(status_code=400, detail="Code is required")
-        result = submit_2fa_code(payload.code.strip())
-        return result
+        return {"status": "qr_required", "message": "Please sign in using Steam Mobile QR Code."}
 
     @app.post("/api/login/qr/begin")
     async def qr_begin_endpoint():

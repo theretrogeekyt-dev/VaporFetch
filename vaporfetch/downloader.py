@@ -216,15 +216,14 @@ class DownloadManager:
                 self.broadcast("queue_update", self.get_queue_state())
                 continue
 
-            has_pwd = bool(auth_session.pending_password and auth_session.username == username)
-            has_cached = has_steamcmd_cached_credentials(username)
-            if not has_pwd and not has_cached:
+            session = get_current_session()
+            is_authenticated = bool(session.get("logged_in") and (session.get("username") or username))
+            if not is_authenticated and not has_steamcmd_cached_credentials(username):
                 task.status = "failed"
-                task.error = "SteamCMD login required. Please sign in with Password & 2FA via Account."
+                task.error = "Steam login required. Please sign in via Account (Steam Mobile QR Code)."
                 self.add_log(
-                    f"Cannot download '{task.name}': SteamCMD credentials not found for '{username}'. "
-                    "QR code login only enables Web API library browsing. To download game files, Valve requires "
-                    "an authenticated SteamCMD session. Please click 'Account' and sign in once with Password & Steam Guard."
+                    f"Cannot download '{task.name}': Not logged in to Steam. "
+                    "Please click 'Account' and scan the QR code with your Steam Mobile App to authenticate."
                 )
                 with self.lock:
                     self.history.append(task)

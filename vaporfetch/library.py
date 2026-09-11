@@ -433,7 +433,41 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
         except Exception as e:
             print(f"[VaporFetch] Notice: Web API GetOwnedGames query: {e}")
 
-    # 2. Try SteamCMD licenses if not populated via Web API
+    # 1b. Try Steam Community XML games feed (no API key needed for public libraries or with session cookie)
+    if not app_ids and steam_id:
+        comm_candidates = [
+            f"https://steamcommunity.com/profiles/{steam_id}/games?tab=all&xml=1"
+        ]
+        if custom_id and not custom_id.isdigit():
+            comm_candidates.append(f"https://steamcommunity.com/id/{custom_id}/games?tab=all&xml=1")
+        if username and username != custom_id:
+            comm_candidates.append(f"https://steamcommunity.com/id/{username}/games?tab=all&xml=1")
+
+        for curl in comm_candidates:
+            try:
+                headers = {"User-Agent": "VaporFetch/1.0"}
+                if access_token:
+                    headers["Cookie"] = f"steamLoginSecure={steam_id}%7C%7C{access_token}"
+                req = urllib.request.Request(curl, headers=headers)
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    xml_content = resp.read().decode("utf-8", errors="replace")
+                    if "<games>" in xml_content:
+                        import xml.etree.ElementTree as ET
+                        root = ET.fromstring(xml_content)
+                        for g in root.findall(".//game"):
+                            aid = g.findtext("appID")
+                            name = g.findtext("name")
+                            if aid and aid.isdigit():
+                                app_ids.add(int(aid))
+                                if name:
+                                    resolver.app_map[int(aid)] = name
+                        if app_ids:
+                            print(f"[VaporFetch] Retrieved {len(app_ids)} games via Steam Community feed for {steam_id}")
+                            break
+            except Exception as e:
+                print(f"[VaporFetch] Notice: Steam Community games feed query: {e}")
+
+    # 2. Try SteamCMD licenses if not populated via Web API or Community XML
     if not app_ids and username:
         auth_method = session.get("auth_method", "steamcmd")
         from vaporfetch.steamcmd import auth_session, has_steamcmd_cached_credentials

@@ -374,8 +374,35 @@ class TestSteamCMDParser(unittest.TestCase):
                 self.assertTrue(has_steamcmd_cached_credentials("reaper360vr"))
                 self.assertFalse(has_steamcmd_cached_credentials("otheruser"))
 
+    def test_submit_2fa_code_includes_code_in_login_cmd(self):
+        from unittest.mock import patch, MagicMock
+        from vaporfetch.steamcmd import submit_2fa_code, auth_session
+
+        auth_session.reset()
+        auth_session.username = "reaper360vr"
+        auth_session.pending_password = "SecretPassword123"
+        auth_session.process = None
+
+        mock_res = MagicMock()
+        mock_res.stdout = "Logging in user 'reaper360vr' to Steam Public...\nLogged in OK\nSteam>"
+
+        with patch("subprocess.run", return_value=mock_res) as mock_run, \
+             patch("vaporfetch.steamcmd.save_current_session") as mock_save:
+            res = submit_2fa_code("K97XP")
+
+            self.assertEqual(res["status"], "logged_in")
+            mock_run.assert_called_once()
+            called_cmd = mock_run.call_args[0][0]
+            # Ensure the 2FA code is passed as argument 3 to +login!
+            login_idx = called_cmd.index("+login")
+            self.assertEqual(called_cmd[login_idx + 1], "reaper360vr")
+            self.assertEqual(called_cmd[login_idx + 2], "SecretPassword123")
+            self.assertEqual(called_cmd[login_idx + 3], "K97XP")
+            mock_save.assert_called_once()
+
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

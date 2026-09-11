@@ -297,9 +297,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (elements.loginSteamGuard) {
       elements.loginSteamGuard.addEventListener("input", (e) => {
         e.target.value = e.target.value.toUpperCase();
-        if (e.target.value.trim().length === 5 && elements.loginUsername.value.trim()) {
-          handleLoginSubmit();
-        }
       });
       elements.loginSteamGuard.addEventListener("keypress", (e) => {
         if (e.key === "Enter") handleLoginSubmit();

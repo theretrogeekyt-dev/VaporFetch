@@ -406,7 +406,12 @@ def start_login(username: str, password: Optional[str] = None, code: Optional[st
     while time.time() - start_time < timeout_secs:
         if auth_session.status in ("logged_in", "failed"):
             break
-        if auth_session.status == "awaiting_2fa" and not auth_session.pending_code:
+        if auth_session.status == "awaiting_2fa":
+            if auth_session.pending_code:
+                upfront = auth_session.pending_code
+                auth_session.pending_code = None
+                log_steamcmd("Steam Guard 2FA required. Submitting upfront code...")
+                return submit_2fa_code(upfront)
             break
         time.sleep(0.2)
 
@@ -666,8 +671,12 @@ def submit_2fa_code(code: str) -> Dict[str, Any]:
     ]
     if password:
         cmd.append(password)
+        cmd.append(clean_code)
+    else:
+        cmd.append(clean_code)
     cmd.extend(["+licenses_print", "+quit"])
 
+    log_steamcmd(f"Authenticating Steam Guard 2FA for '{username}'...")
     try:
         res = subprocess.run(
             cmd,
@@ -679,6 +688,9 @@ def submit_2fa_code(code: str) -> Dict[str, Any]:
             check=False,
         )
         out = res.stdout or ""
+        for line in out.splitlines():
+            if line.strip():
+                log_steamcmd(line.strip())
 
         result = check_login_output(out)
         if result:
@@ -686,24 +698,40 @@ def submit_2fa_code(code: str) -> Dict[str, Any]:
                 auth_session.status = "logged_in"
                 auth_session.username = username
                 auth_session.pending_password = password
-                save_current_session(username, logged_in=True, auth_method="steamcmd")
+                steam_id = ""
+                m_u = re.search(r"\[U:1:([1-9][0-9]*)\]", out)
+                if m_u:
+                    try:
+                        acc_id = int(m_u.group(1))
+                        steam_id = str(76561197960265728 + acc_id)
+                    except Exception:
+                        pass
+                save_current_session(username, logged_in=True, steam_id=steam_id, auth_method="steamcmd")
                 owned_app_ids = parse_licenses_output(out)
                 if owned_app_ids:
                     try:
                         from vaporfetch.library import populate_and_cache_games
                         populate_and_cache_games(owned_app_ids)
-                        logger.info(f"Cached {len(owned_app_ids)} owned games from fallback verification.")
+                        log_steamcmd(f"Successfully cached {len(owned_app_ids)} games to local library.")
                     except Exception as e:
                         logger.error(f"Error caching owned games: {e}")
                 return {"status": "logged_in", "username": username}
             elif result["status"] == "failed":
+                auth_session.status = "failed"
+                auth_session.error_message = result.get("error", "2FA verification failed.")
                 return result
 
         if "Invalid Password" in out:
+            auth_session.status = "failed"
+            auth_session.error_message = "Invalid password."
             return {"status": "failed", "error": "Invalid password."}
 
+        auth_session.status = "failed"
+        auth_session.error_message = "Verification failed. Check the code and try again."
         return {"status": "failed", "error": "Verification failed. Check the code and try again."}
     except Exception as e:
+        auth_session.status = "failed"
+        auth_session.error_message = f"Failed to execute verification: {e}"
         return {"status": "failed", "error": f"Failed to execute verification: {e}"}
 
 

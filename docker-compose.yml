@@ -1,13 +1,7 @@
 services:
   vaporfetch:
-    # Option 1 (Recommended): Pull pre-built image from GitHub Container Registry
-    # (Fastest, zero build time, no manual code downloads required)
     image: ghcr.io/theretrogeekyt-dev/vaporfetch:latest
-
-    # Option 2 (Alternative): Automatically download and build directly from GitHub:
-    # build:
-    #   context: https://github.com/theretrogeekyt-dev/VaporFetch.git#main
-
+    pull_policy: always
     container_name: vaporfetch
     platform: linux/amd64
     restart: unless-stopped

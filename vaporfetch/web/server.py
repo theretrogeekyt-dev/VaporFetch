@@ -65,6 +65,15 @@ if FastAPI is not None:
         folder_format: Optional[str] = None
         steam_api_key: Optional[str] = None
 
+    @app.middleware("http")
+    async def add_cache_control_headers(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static/") or request.url.path == "/":
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
     # Static assets
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

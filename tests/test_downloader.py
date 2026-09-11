@@ -86,6 +86,11 @@ class TestDownloader(unittest.TestCase):
             self.assertNotIn("/downloads/DOOM + DOOM II", called_cmd)
             # Ensure password was NOT placed in CLI arguments
             self.assertNotIn("dummy", called_cmd)
+            # Ensure +quit is omitted so SteamCMD runs in interactive PTY mode
+            self.assertNotIn("+quit", called_cmd)
+            # Ensure @sSteamCmdForcePlatformType precedes +login per Valve specification
+            self.assertIn("+@sSteamCmdForcePlatformType", called_cmd)
+            self.assertLess(called_cmd.index("+@sSteamCmdForcePlatformType"), called_cmd.index("+login"))
 
     def test_run_app_download_success_flow(self):
         from unittest.mock import patch, MagicMock
@@ -117,6 +122,44 @@ class TestDownloader(unittest.TestCase):
             )
             self.assertTrue(res["success"])
             self.assertTrue(any("fully installed" in l for l in logs))
+
+    def test_run_app_download_filters_breakpad_stderr(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch, MagicMock
+        from vaporfetch.steamcmd import run_app_download, auth_session
+        auth_session.reset()
+        auth_session.pending_password = "dummy"
+        auth_session.username = "testuser"
+
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = 254
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_stderr = Path(tmpdir) / ".steam" / "steam" / "logs" / "stderr.txt"
+            fake_stderr.parent.mkdir(parents=True, exist_ok=True)
+            fake_stderr.write_text(
+                "flock /sys/devices/virtual/dmi/id/sys_vendor LOCK_SH failed. errno = 13\n"
+                "09/11 23:06:52 Init: Installing breakpad exception handler for appid(steam)/version(1788292693)/tid(91)\n"
+                "UpdateUI: skip show logo\n",
+                encoding="utf-8"
+            )
+
+            with patch("subprocess.Popen", return_value=mock_proc), \
+                 patch("select.select", return_value=([], [], [])), \
+                 patch("os.environ", {"HOME": tmpdir}), \
+                 patch("os.makedirs"), \
+                 patch("os.close"):
+                res = run_app_download(
+                    appid=1148590,
+                    install_dir="/downloads/DOOM 64",
+                    username="testuser",
+                )
+                self.assertFalse(res["success"])
+                # Breakpad banner and hardware locks should be filtered out
+                self.assertNotIn("Installing breakpad exception handler", res["error"])
+                self.assertNotIn("flock /sys/devices", res["error"])
+                self.assertIn("SteamCMD process exited with code 254", res["error"])
 
 
     def test_save_current_session_preserves_metadata(self):

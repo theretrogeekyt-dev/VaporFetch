@@ -339,6 +339,12 @@ def has_steamcmd_cached_credentials(username: str = "") -> bool:
                     text = cand.read_text(encoding="utf-8", errors="ignore")
                     if uname:
                         if uname in text.lower() or f'"{uname}"' in text.lower():
+                            # Check if companion config.vdf has an explicit empty RefreshToken stub
+                            cfg = base / "config" / "config.vdf"
+                            if cfg.exists():
+                                cfg_text = cfg.read_text(encoding="utf-8", errors="ignore")
+                                if re.search(rf'"{re.escape(uname)}"\s*\{{[^}}]*"RefreshToken"\s*""', cfg_text, re.IGNORECASE):
+                                    continue
                             return True
                     elif "accountname" in text.lower() or "personaname" in text.lower():
                         return True
@@ -352,6 +358,9 @@ def has_steamcmd_cached_credentials(username: str = "") -> bool:
                     text = cand.read_text(encoding="utf-8", errors="ignore")
                     if uname:
                         if uname in text.lower() or f'"{uname}"' in text.lower():
+                            # If this account block has an explicit empty RefreshToken stub, ignore it
+                            if re.search(rf'"{re.escape(uname)}"\s*\{{[^}}]*"RefreshToken"\s*""', text, re.IGNORECASE):
+                                continue
                             return True
                     elif '"Accounts"' in text:
                         return True
@@ -700,8 +709,19 @@ def _monitor_login_pty():
 
         try:
             if auth_session.process and auth_session.process.poll() is None:
-                auth_session.process.terminate()
-                auth_session.process.wait(timeout=2)
+                log_steamcmd("Closing SteamCMD session cleanly to persist authentication tickets...")
+                try:
+                    os.write(master_fd, b"quit\n")
+                except Exception:
+                    pass
+                wait_exit_start = time.time()
+                while time.time() - wait_exit_start < 5.0:
+                    if auth_session.process.poll() is not None:
+                        break
+                    time.sleep(0.2)
+                if auth_session.process.poll() is None:
+                    auth_session.process.terminate()
+                    auth_session.process.wait(timeout=2)
         except Exception:
             pass
 
@@ -1221,25 +1241,27 @@ def run_app_download(
     # Valve's SteamCMD CLI requires quoting paths that contain spaces
     safe_dir_arg = f'"{safe_install_dir}"' if " " in safe_install_dir else safe_install_dir
     steamcmd_bin = find_steamcmd_path()
-    cmd = [
-        steamcmd_bin,
-        "+force_install_dir", safe_dir_arg,
-        "+login", active_user,
-    ]
-    # Note: Do NOT append password to CLI args.
-    # Passing password on the command line bypasses cached credentials, forces 2FA challenges
-    # that immediately abort in batch mode (exit code 254), and leaks secrets in ps aux.
-    # If SteamCMD prompts for password at runtime, our interactive PTY handler injects it below.
+    cmd = [steamcmd_bin]
 
+    # Valve requirement: @sSteamCmdForcePlatformType MUST precede login
     if platform and platform.lower() in ("windows", "linux", "macos"):
         cmd.extend(["+@sSteamCmdForcePlatformType", platform.lower()])
+
+    cmd.extend([
+        "+login", active_user,
+        "+force_install_dir", safe_dir_arg,
+    ])
 
     if validate:
         cmd.extend(["+app_update", str(appid), "validate"])
     else:
         cmd.extend(["+app_update", str(appid)])
 
-    cmd.append("+quit")
+    # NOTE: We intentionally do NOT append "+quit" to CLI args!
+    # In batch mode with "+quit", SteamCMD immediately aborts with exit code 254
+    # if credentials require authentication or validation. By running interactively
+    # attached to our PTY, SteamCMD allows interactive password injection and
+    # clean shutdown via quit\n upon completion.
 
     if log_cb:
         log_cb(f"Starting SteamCMD for AppID {appid} (Platform: {platform})...")
@@ -1281,12 +1303,26 @@ def run_app_download(
         success = False
         error_message = ""
         password_injected = False
+        quit_sent = False
         accum = ""
 
         while True:
             if cancel_event and cancel_event.is_set():
+                if not quit_sent:
+                    quit_sent = True
+                    try:
+                        if use_pty and master_fd is not None:
+                            os.write(master_fd, b"quit\n")
+                        elif hasattr(proc.stdin, "write"):
+                            proc.stdin.write(b"quit\n")
+                            proc.stdin.flush()
+                    except Exception:
+                        pass
                 if proc and proc.poll() is None:
-                    proc.terminate()
+                    try:
+                        proc.wait(timeout=2)
+                    except Exception:
+                        proc.terminate()
                 if log_cb:
                     log_cb(f"Download for AppID {appid} cancelled by user.")
                 return {"success": False, "error": "Cancelled by user"}
@@ -1341,18 +1377,54 @@ def run_app_download(
             accum += chunk
 
             # Check for interactive password prompt if not passed on CLI
-            if pwd and not password_injected and re.search(r"(?:^|[\r\n])[^\r\n]*?[Pp]assword:\s*$", accum):
+            if not password_injected and re.search(r"(?:^|[\r\n])[^\r\n]*?[Pp]assword:\s*$", accum):
                 password_injected = True
+                if pwd:
+                    if log_cb:
+                        log_cb("Submitting password securely to SteamCMD prompt...")
+                    try:
+                        if use_pty:
+                            os.write(master_fd, f"{pwd}\n".encode("utf-8"))
+                        elif hasattr(proc.stdin, "write"):
+                            proc.stdin.write(f"{pwd}\n".encode("utf-8") if isinstance(proc.stdin, io.BufferedWriter) else f"{pwd}\n")
+                            proc.stdin.flush()
+                    except Exception as e:
+                        logger.error(f"Failed to pass password to SteamCMD stdin: {e}")
+                else:
+                    error_message = (
+                        f"Steam account '{active_user}' password required. "
+                        "Please click 'Account' -> 'Sign In' in the top bar to connect."
+                    )
+                    if log_cb:
+                        log_cb(error_message)
+                    if not quit_sent:
+                        quit_sent = True
+                        try:
+                            if use_pty:
+                                os.write(master_fd, b"quit\n")
+                            elif hasattr(proc.stdin, "write"):
+                                proc.stdin.write(b"quit\n")
+                                proc.stdin.flush()
+                        except Exception:
+                            pass
+
+            # Check for 2FA prompt requirement during download
+            if not quit_sent and ("Steam Guard" in accum or "Two-factor code:" in accum or "Account Logon Denied" in accum or "confirm the login in the Steam Mobile" in accum):
+                error_message = (
+                    f"Steam Guard authentication required for '{active_user}'. "
+                    "Please click 'Account' -> 'Sign In' in the top bar to authenticate."
+                )
                 if log_cb:
-                    log_cb("Submitting password securely to SteamCMD prompt...")
+                    log_cb(error_message)
+                quit_sent = True
                 try:
                     if use_pty:
-                        os.write(master_fd, f"{pwd}\n".encode("utf-8"))
+                        os.write(master_fd, b"quit\n")
                     elif hasattr(proc.stdin, "write"):
-                        proc.stdin.write(f"{pwd}\n".encode("utf-8") if isinstance(proc.stdin, io.BufferedWriter) else f"{pwd}\n")
+                        proc.stdin.write(b"quit\n")
                         proc.stdin.flush()
-                except Exception as e:
-                    logger.error(f"Failed to pass password to SteamCMD stdin: {e}")
+                except Exception:
+                    pass
 
             # Process all newline-terminated lines
             while "\n" in accum:
@@ -1370,10 +1442,30 @@ def run_app_download(
                 # Check success/error
                 if RE_APP_SUCCESS.search(line_str):
                     success = True
+                    if not quit_sent:
+                        quit_sent = True
+                        try:
+                            if use_pty:
+                                os.write(master_fd, b"quit\n")
+                            elif hasattr(proc.stdin, "write"):
+                                proc.stdin.write(b"quit\n")
+                                proc.stdin.flush()
+                        except Exception:
+                            pass
 
                 err_match = RE_APP_ERROR.search(line_str)
                 if err_match:
                     error_message = err_match.group(2)
+                    if not quit_sent:
+                        quit_sent = True
+                        try:
+                            if use_pty:
+                                os.write(master_fd, b"quit\n")
+                            elif hasattr(proc.stdin, "write"):
+                                proc.stdin.write(b"quit\n")
+                                proc.stdin.flush()
+                        except Exception:
+                            pass
                 elif "ERROR (" in line_str or "FAILED (" in line_str:
                     error_message = line_str
 
@@ -1410,12 +1502,23 @@ def run_app_download(
                         try:
                             with open(sc, "r", encoding="utf-8", errors="replace") as f:
                                 tail = [l.strip() for l in f.readlines() if l.strip()]
-                                # Filter out benign hardware warning messages from DMI / sysfs
+                                # Filter out benign hardware / crash handler / startup warning messages
+                                benign_patterns = (
+                                    "flock /sys/devices",
+                                    "LOCK_SH failed",
+                                    "Installing breakpad exception handler",
+                                    "glibc >= 2.15",
+                                    "crash_reporter",
+                                    "UpdateUI: skip show logo",
+                                    "Checking for available updates",
+                                    "Download complete",
+                                    "Verifying installation",
+                                )
                                 relevant = [
                                     l for l in tail
-                                    if "flock /sys/devices" not in l and "LOCK_SH failed" not in l
+                                    if not any(bp.lower() in l.lower() for bp in benign_patterns)
                                 ]
-                                err_text = relevant[-1] if relevant else (tail[-1] if tail else "")
+                                err_text = relevant[-1] if relevant else ""
                                 if err_text:
                                     if "!BLoggedOn" in err_text or "LoggedOn" in err_text:
                                         error_message = (
@@ -1439,6 +1542,16 @@ def run_app_download(
             log_cb(err)
         return {"success": False, "error": err}
     finally:
+        if proc and proc.poll() is None:
+            try:
+                if use_pty and master_fd is not None:
+                    os.write(master_fd, b"quit\n")
+                elif hasattr(proc.stdin, "write"):
+                    proc.stdin.write(b"quit\n")
+                    proc.stdin.flush()
+                proc.wait(timeout=2)
+            except Exception:
+                pass
         if proc and proc.poll() is None:
             try:
                 proc.terminate()

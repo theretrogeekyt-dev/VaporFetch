@@ -1,0 +1,21 @@
+services:
+  vaporfetch:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vaporfetch:latest
+    container_name: vaporfetch
+    platform: linux/amd64
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - DEFAULT_PLATFORM=windows
+      - VALIDATE_DOWNLOADS=true
+      - PORT=8080
+    volumes:
+      - ./data:/data
+      - ./downloads:/downloads
+      - ./data/steam_root:/root/.steam
+      - ./data/steam_share:/root/.local/share/Steam
+

@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VaporFetch - Steam Game Downloader</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Top Navigation / Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="logo">
+          <span class="logo-icon">💨</span>
+          <span class="logo-text">Vapor<span class="highlight">Fetch</span></span>
+        </div>
+        <span class="version-badge">v1.0</span>
+      </div>
+
+      <div class="header-center">
+        <div class="storage-widget" id="storageWidget" title="Free storage in /downloads">
+          <div class="storage-label">
+            <span>Storage:</span>
+            <span id="storageDetails">-- / -- GB</span>
+          </div>
+          <div class="storage-bar">
+            <div class="storage-fill" id="storageFill" style="width: 0%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <div class="connection-status">
+          <span class="status-dot pulse" id="streamStatus"></span>
+          <span id="streamStatusText">Connected</span>
+        </div>
+        <div class="user-pill" id="userPill">
+          <span class="user-avatar" id="userAvatar">👤</span>
+          <span class="user-name" id="userName">Not Logged In</span>
+          <button class="btn btn-sm btn-outline" id="authBtn">Login</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Navigation Bar -->
+    <nav class="nav-tabs">
+      <button class="tab-btn active" data-tab="libraryTab">
+        <span class="tab-icon">📚</span> Library <span class="badge" id="libraryCountBadge">0</span>
+      </button>
+      <button class="tab-btn" data-tab="downloadsTab">
+        <span class="tab-icon">⚡</span> Downloads & Queue <span class="badge" id="queueCountBadge">0</span>
+      </button>
+      <button class="tab-btn" data-tab="terminalTab">
+        <span class="tab-icon">📟</span> SteamCMD Logs
+      </button>
+      <button class="tab-btn" data-tab="settingsTab">
+        <span class="tab-icon">⚙️</span> Settings
+      </button>
+    </nav>
+
+    <!-- Content Sections -->
+    <main class="app-main">
+      
+      <!-- Tab 1: Library Browser -->
+      <section id="libraryTab" class="tab-content active">
+        <div class="toolbar">
+          <div class="toolbar-left">
+            <div class="search-box">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="searchInput" placeholder="Search games by name or AppID...">
+            </div>
+            <select id="filterStatus" class="select-input">
+              <option value="all">All Games</option>
+              <option value="not_downloaded">Not Backed Up</option>
+              <option value="downloaded">Backed Up</option>
+            </select>
+            <select id="platformSelect" class="select-input" title="Depot Platform">
+              <option value="windows">Platform: Windows</option>
+              <option value="linux">Platform: Linux</option>
+              <option value="macos">Platform: macOS</option>
+            </select>
+          </div>
+
+          <div class="toolbar-right">
+            <button class="btn btn-secondary" id="selectAllBtn">Select All</button>
+            <button class="btn btn-secondary" id="deselectAllBtn">Clear Selection</button>
+            <button class="btn btn-refresh" id="refreshLibraryBtn" title="Sync licenses from SteamCMD">
+              🔄 Sync Steam Library
+            </button>
+            <button class="btn btn-primary" id="backupSelectedBtn" disabled>
+              💾 Backup Selected (<span id="selectedCount">0</span>)
+            </button>
+            <button class="btn btn-accent" id="backupAllBtn">
+              📦 Backup All Games
+            </button>
+          </div>
+        </div>
+
+        <!-- Manual AppID Adder -->
+        <div class="manual-add-bar">
+          <span>Manually add game by AppID:</span>
+          <input type="number" id="manualAppId" placeholder="e.g. 730" class="manual-input">
+          <button class="btn btn-sm btn-outline" id="manualAddBtn">+ Queue AppID</button>
+        </div>
+
+        <!-- Games Grid -->
+        <div class="games-container">
+          <div id="gamesLoading" class="loading-spinner hidden">
+            <div class="spinner"></div>
+            <p>Syncing games from SteamCMD licenses... Please wait.</p>
+          </div>
+          <div id="gamesEmpty" class="empty-state hidden">
+            <div class="empty-icon">🎮</div>
+            <h3>No Games Found</h3>
+            <p>Log in with your Steam account to discover and backup your game library.</p>
+            <button class="btn btn-primary" id="emptyLoginBtn">Log in to Steam</button>
+          </div>
+          <div class="games-grid" id="gamesGrid">
+            <!-- Game cards dynamically rendered here -->
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab 2: Downloads & Queue -->
+      <section id="downloadsTab" class="tab-content">
+        <!-- Active Download Card -->
+        <div class="active-download-card" id="activeDownloadCard">
+          <div class="card-header">
+            <h3>⚡ Current Download</h3>
+            <button class="btn btn-danger btn-sm" id="cancelActiveBtn" style="display:none;">Cancel Download</button>
+          </div>
+          <div id="noActiveDownload" class="no-active-task">
+            <p>No downloads currently running. Select games from your library to start backing up.</p>
+          </div>
+          <div id="activeDownloadDetails" class="active-details" style="display:none;">
+            <div class="active-meta">
+              <div class="active-title-group">
+                <span class="active-game-name" id="activeGameName">Game Title</span>
+                <span class="badge" id="activeAppId">AppID: 0000</span>
+                <span class="badge badge-platform" id="activePlatform">windows</span>
+              </div>
+              <div class="active-speed-group">
+                <span class="speed-val" id="activeSpeed">-- MB/s</span>
+                <span class="eta-val" id="activeEta">ETA: --</span>
+              </div>
+            </div>
+
+            <!-- Progress Bar -->
+            <div class="progress-wrapper">
+              <div class="progress-bar-container">
+                <div class="progress-bar-fill" id="activeProgressBar" style="width: 0%;"></div>
+              </div>
+              <div class="progress-stats">
+                <span id="activePercent">0.0%</span>
+                <span id="activeByteProgress">0 B / 0 B</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Upcoming Queue -->
+        <div class="queue-section">
+          <div class="section-header">
+            <h3>Upcoming Queue (<span id="queueCount">0</span>)</h3>
+            <button class="btn btn-sm btn-outline" id="clearQueueBtn">Clear Queue</button>
+          </div>
+          <div class="queue-list" id="queueList">
+            <div class="empty-queue-msg">The download queue is empty.</div>
+          </div>
+        </div>
+
+        <!-- Download History -->
+        <div class="history-section">
+          <div class="section-header">
+            <h3>Recent Downloads</h3>
+          </div>
+          <div class="history-list" id="historyList">
+            <!-- Completed/failed items -->
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab 3: Terminal Logs -->
+      <section id="terminalTab" class="tab-content">
+        <div class="terminal-container">
+          <div class="terminal-header">
+            <div class="terminal-dots">
+              <span class="dot red"></span>
+              <span class="dot yellow"></span>
+              <span class="dot green"></span>
+            </div>
+            <span class="terminal-title">SteamCMD Output Stream</span>
+            <div class="terminal-actions">
+              <label><input type="checkbox" id="autoScrollCheck" checked> Auto-scroll</label>
+              <button class="btn btn-sm btn-outline" id="clearLogsBtn">Clear</button>
+            </div>
+          </div>
+          <div class="terminal-body" id="terminalOutput">
+            <div class="terminal-line log-system">VaporFetch console initialized. Ready for commands.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab 4: Settings -->
+      <section id="settingsTab" class="tab-content">
+        <div class="settings-card">
+          <h3>Application Settings</h3>
+          <form id="settingsForm">
+            <div class="form-group">
+              <label for="settingDefaultPlatform">Default Download Platform:</label>
+              <select id="settingDefaultPlatform" class="select-input">
+                <option value="windows">Windows (Recommended for PC backups)</option>
+                <option value="linux">Linux (Native Linux depots)</option>
+                <option value="macos">macOS</option>
+              </select>
+              <small class="form-hint">Most Steam games only have Windows depots. SteamCMD can download Windows binaries to Linux containers when set to Windows.</small>
+            </div>
+
+            <div class="form-group">
+              <label for="settingFolderFormat">Backup Folder Name Format:</label>
+              <select id="settingFolderFormat" class="select-input">
+                <option value="{name}">{Game Name}</option>
+                <option value="{name} ({appid})">{Game Name} ({AppID})</option>
+                <option value="{appid}">{AppID}</option>
+              </select>
+              <small class="form-hint">Destination directory structure inside /downloads.</small>
+            </div>
+
+            <div class="form-group">
+              <label>
+                <input type="checkbox" id="settingValidate"> Validate Game Files After Download
+              </label>
+              <small class="form-hint">Ensures backup integrity using SteamCMD's checksum verification.</small>
+            </div>
+
+            <div class="form-group">
+              <label for="settingApiKey">Steam Web API Key (Optional):</label>
+              <input type="text" id="settingApiKey" class="text-input" placeholder="Enter key if available...">
+              <small class="form-hint">Not required. VaporFetch automatically resolves games using public Steam manifests and SteamCMD licenses.</small>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Save Settings</button>
+          </form>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Authentication Modal -->
+    <div class="modal-overlay" id="authModal" style="display: none;">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 id="modalTitle">🔑 Steam Account Login</h3>
+          <button class="modal-close" id="modalCloseBtn">&times;</button>
+        </div>
+
+        <div class="modal-body">
+          <!-- Step 1: Username & Password -->
+          <div id="loginStepCredentials">
+            <p class="modal-info">Log into your Steam account through SteamCMD to browse and backup your owned games.</p>
+            <div class="form-group">
+              <label for="loginUsername">Steam Username:</label>
+              <input type="text" id="loginUsername" class="text-input" placeholder="Steam account username" required autocomplete="username">
+            </div>
+            <div class="form-group">
+              <label for="loginPassword">Steam Password:</label>
+              <input type="password" id="loginPassword" class="text-input" placeholder="Password" autocomplete="current-password">
+              <small class="form-hint">Leave blank if you previously logged in and have remembered credentials.</small>
+            </div>
+            <div id="loginError" class="alert alert-error" style="display: none;"></div>
+            <div class="modal-footer">
+              <button class="btn btn-secondary" id="loginCancelBtn">Cancel</button>
+              <button class="btn btn-primary" id="loginSubmitBtn">Continue</button>
+            </div>
+          </div>
+
+          <!-- Step 2: Steam Guard 2FA Prompt -->
+          <div id="loginStep2FA" style="display: none;">
+            <div class="alert alert-info">
+              <span class="alert-icon">🛡️</span>
+              <span id="twoFactorPromptText">Enter Steam Guard 2FA Code</span>
+            </div>
+            <div class="form-group">
+              <label for="twoFactorCode">Steam Guard Code:</label>
+              <input type="text" id="twoFactorCode" class="text-input code-input" placeholder="e.g. R4NDM" maxlength="10" autofocus>
+              <small class="form-hint">Check your Steam Mobile App or registered Email.</small>
+            </div>
+            <div id="twoFactorError" class="alert alert-error" style="display: none;"></div>
+            <div class="modal-footer">
+              <button class="btn btn-secondary" id="twoFactorCancelBtn">Cancel</button>
+              <button class="btn btn-primary" id="twoFactorSubmitBtn">Verify & Sign In</button>
+            </div>
+          </div>
+
+          <!-- Step 3: Authenticated State -->
+          <div id="loginStepSuccess" style="display: none;">
+            <div class="alert alert-success">
+              <span>✅ Logged in successfully!</span>
+            </div>
+            <p>Your session is active and cached for container restarts.</p>
+            <div class="modal-footer">
+              <button class="btn btn-primary" id="loginDoneBtn">Close</button>
+              <button class="btn btn-danger" id="logoutBtn">Log Out</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,260 @@
+import os
+import re
+import json
+import time
+import urllib.request
+import urllib.error
+from pathlib import Path
+from typing import Dict, List, Any, Optional, Set
+
+from vaporfetch.config import (
+    DATA_DIR,
+    DOWNLOADS_DIR,
+    APP_CACHE_FILE,
+    LIBRARY_CACHE_FILE,
+    load_settings,
+)
+from vaporfetch.steamcmd import get_current_session, fetch_licenses
+
+# Pre-populated dictionary of common Steam games for instant offline lookup
+COMMON_STEAM_APPS = {
+    10: "Counter-Strike",
+    70: "Half-Life",
+    220: "Half-Life 2",
+    240: "Counter-Strike: Source",
+    400: "Portal",
+    440: "Team Fortress 2",
+    550: "Left 4 Dead 2",
+    570: "Dota 2",
+    620: "Portal 2",
+    730: "Counter-Strike 2",
+    105600: "Terraria",
+    252490: "Rust",
+    271590: "Grand Theft Auto V",
+    292030: "The Witcher 3: Wild Hunt",
+    359550: "Tom Clancy's Rainbow Six Siege",
+    381210: "Dead by Daylight",
+    413150: "Stardew Valley",
+    578080: "PUBG: BATTLEGROUNDS",
+    1086940: "Baldur's Gate 3",
+    1091500: "Cyberpunk 2077",
+    1172470: "Apex Legends",
+    1245620: "ELDEN RING",
+    1623730: "Palworld",
+    2050650: "Resident Evil 4",
+}
+
+class AppResolver:
+    """Resolves Steam AppIDs to game titles using local cache and Steam Web API."""
+    def __init__(self):
+        self.app_map: Dict[int, str] = dict(COMMON_STEAM_APPS)
+        self._load_cache()
+
+    def _load_cache(self) -> None:
+        if APP_CACHE_FILE.exists():
+            try:
+                with open(APP_CACHE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    for k, v in data.items():
+                        self.app_map[int(k)] = v
+            except Exception as e:
+                print(f"[VaporFetch] Warning: Failed to load app cache: {e}")
+
+    def save_cache(self) -> None:
+        try:
+            with open(APP_CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump(self.app_map, f)
+        except Exception as e:
+            print(f"[VaporFetch] Warning: Failed to save app cache: {e}")
+
+    def update_from_steam_api(self) -> bool:
+        """Download complete Steam AppID master list."""
+        url = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "VaporFetch/1.0 (Steam Game Downloader)"}
+            )
+            with urllib.request.urlopen(req, timeout=15) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+                apps = payload.get("applist", {}).get("apps", [])
+                for item in apps:
+                    aid = item.get("appid")
+                    name = item.get("name", "").strip()
+                    if aid and name:
+                        self.app_map[int(aid)] = name
+                self.save_cache()
+                return True
+        except Exception as e:
+            print(f"[VaporFetch] Notice: Could not update app list from Steam API: {e}")
+            return False
+
+    def resolve_name(self, appid: int) -> str:
+        """Get the title for an AppID, querying store API if missing."""
+        if appid in self.app_map:
+            return self.app_map[appid]
+
+        # Try online store API lookup for single app
+        try:
+            url = f"https://store.steampowered.com/api/appdetails?appids={appid}"
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "VaporFetch/1.0"}
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                if str(appid) in data and data[str(appid)].get("success"):
+                    name = data[str(appid)]["data"].get("name", "").strip()
+                    if name:
+                        self.app_map[appid] = name
+                        self.save_cache()
+                        return name
+        except Exception:
+            pass
+
+        return f"Steam App {appid}"
+
+resolver = AppResolver()
+
+
+def sanitize_folder_name(name: str) -> str:
+    """Sanitize game title for safe folder creation across Linux/Windows/Mac."""
+    clean = re.sub(r'[\\/*?:"<>|]', "_", name)
+    clean = re.sub(r"\s+", " ", clean).strip()
+    return clean or "Unknown_Game"
+
+
+def get_game_install_dir(name: str, appid: int) -> Path:
+    """Return the destination path for an app backup based on user settings."""
+    settings = load_settings()
+    fmt = settings.get("folder_format", "{name}")
+    safe_name = sanitize_folder_name(name)
+    folder_name = fmt.format(name=safe_name, appid=appid)
+    return DOWNLOADS_DIR / sanitize_folder_name(folder_name)
+
+
+def check_backup_status(name: str, appid: int) -> Dict[str, Any]:
+    """
+    Check if a game is already downloaded / backed up in DOWNLOADS_DIR.
+    Returns status ('downloaded', 'incomplete', 'not_downloaded') and size.
+    """
+    game_dir = get_game_install_dir(name, appid)
+    if not game_dir.exists():
+        # Also check fallback directory names
+        fallback_dir = DOWNLOADS_DIR / str(appid)
+        if fallback_dir.exists():
+            game_dir = fallback_dir
+        else:
+            return {"status": "not_downloaded", "size_bytes": 0, "size_formatted": "0 B"}
+
+    # Check for steam manifest or game files
+    manifest = game_dir / "steamapps" / f"appmanifest_{appid}.acf"
+    total_size = 0
+    file_count = 0
+
+    try:
+        for entry in os.scandir(str(game_dir)):
+            if entry.is_file():
+                total_size += entry.stat().st_size
+                file_count += 1
+            elif entry.is_dir():
+                for root, _, files in os.walk(entry.path):
+                    for f in files:
+                        p = os.path.join(root, f)
+                        try:
+                            total_size += os.path.getsize(p)
+                            file_count += 1
+                        except OSError:
+                            pass
+    except Exception:
+        pass
+
+    if file_count == 0 or total_size == 0:
+        return {"status": "not_downloaded", "size_bytes": 0, "size_formatted": "0 B"}
+
+    # Format human-readable size
+    size_str = format_bytes(total_size)
+
+    # If manifest exists or files exist with substantial size
+    if manifest.exists() or total_size > 1024 * 1024:
+        return {
+            "status": "downloaded",
+            "size_bytes": total_size,
+            "size_formatted": size_str,
+            "install_dir": str(game_dir),
+        }
+
+    return {
+        "status": "incomplete",
+        "size_bytes": total_size,
+        "size_formatted": size_str,
+        "install_dir": str(game_dir),
+    }
+
+
+def format_bytes(size: float) -> str:
+    """Convert bytes to human-readable string (KB, MB, GB, TB)."""
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if size < 1024.0 or unit == "TB":
+            return f"{size:.2f} {unit}" if unit in ("GB", "TB") else f"{int(size)} {unit}"
+        size /= 1024.0
+    return f"{size:.2f} TB"
+
+
+def get_library(force_refresh: bool = False) -> List[Dict[str, Any]]:
+    """
+    Retrieve user's owned games library with backup status.
+    Uses cached licenses list or refreshes via SteamCMD.
+    """
+    session = get_current_session()
+    username = session.get("username", "")
+
+    if not force_refresh and LIBRARY_CACHE_FILE.exists():
+        try:
+            with open(LIBRARY_CACHE_FILE, "r", encoding="utf-8") as f:
+                games = json.load(f)
+                # Update dynamic backup status
+                for g in games:
+                    status_info = check_backup_status(g["name"], g["appid"])
+                    g["backup_status"] = status_info["status"]
+                    g["backup_size"] = status_info["size_formatted"]
+                    g["backup_size_bytes"] = status_info["size_bytes"]
+                return games
+        except Exception:
+            pass
+
+    if not username:
+        return []
+
+    # Refresh licenses via SteamCMD
+    app_ids = fetch_licenses(username)
+    if not app_ids:
+        return []
+
+    # Attempt updating app cache if needed
+    if len(resolver.app_map) <= len(COMMON_STEAM_APPS):
+        resolver.update_from_steam_api()
+
+    games = []
+    for aid in sorted(app_ids):
+        # Ignore common steam redistributables / runtimes if desired (e.g. Steamworks Common Redistributables is 228980)
+        name = resolver.resolve_name(aid)
+        status_info = check_backup_status(name, aid)
+        games.append({
+            "appid": aid,
+            "name": name,
+            "image": f"https://steamcdn-a.akamaihd.net/steam/apps/{aid}/header.jpg",
+            "backup_status": status_info["status"],
+            "backup_size": status_info["size_formatted"],
+            "backup_size_bytes": status_info["size_bytes"],
+        })
+
+    # Save to cache
+    try:
+        with open(LIBRARY_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(games, f, indent=2)
+    except Exception as e:
+        print(f"[VaporFetch] Error saving library cache: {e}")
+
+    return games
+

@@ -6,10 +6,13 @@ import subprocess
 import threading
 import time
 import json
+import logging
 from pathlib import Path
 from typing import Dict, Any, List, Set, Optional, Callable
 
 from vaporfetch.config import find_steamcmd_path, DATA_DIR, SESSION_FILE
+
+logger = logging.getLogger("vaporfetch.steamcmd")
 
 # Regular expressions for SteamCMD parsing
 RE_PROGRESS = re.compile(
@@ -97,6 +100,7 @@ class SteamCMDAuthSession:
         self.username: str = ""
         self.pending_password: Optional[str] = None
         self.pending_code: Optional[str] = None
+        self.code_injected_at: int = -1
         self.status: str = "idle"  # idle, authenticating, awaiting_2fa, logged_in, failed
         self.two_factor_type: str = "email"
         self.error_message: str = ""
@@ -121,6 +125,7 @@ class SteamCMDAuthSession:
             self.username = ""
             self.pending_password = None
             self.pending_code = None
+            self.code_injected_at = -1
             self.status = "idle"
             self.two_factor_type = "email"
             self.error_message = ""
@@ -237,7 +242,6 @@ def _monitor_login_pty():
     """Background reader for the interactive login PTY."""
     master_fd = auth_session.master_fd
     accumulated = ""
-    upfront_code_sent = False
 
     while auth_session.status in ("authenticating", "awaiting_2fa"):
         try:
@@ -255,6 +259,30 @@ def _monitor_login_pty():
             accumulated += chunk
             auth_session._output_buffer.append(chunk)
 
+            # If a 2FA code was already injected (upfront or via submit_2fa_code),
+            # only inspect output arriving AFTER the injection!
+            if auth_session.code_injected_at >= 0:
+                post_code_output = accumulated[auth_session.code_injected_at:]
+                if not post_code_output.strip():
+                    continue
+                result = check_login_output(post_code_output)
+                if result:
+                    if result["status"] == "logged_in":
+                        auth_session.status = "logged_in"
+                        auth_session.pending_password = None
+                        save_current_session(auth_session.username, logged_in=True)
+                        break
+                    elif result["status"] == "awaiting_2fa":
+                        # SteamCMD prompted for 2FA again after the code was injected!
+                        auth_session.status = "failed"
+                        auth_session.error_message = "Steam Guard code was incorrect or expired. Please check your Steam Mobile App and try again."
+                        break
+                    elif result["status"] == "failed":
+                        auth_session.status = "failed"
+                        auth_session.error_message = result.get("error", "Login failed")
+                        break
+                continue
+
             # Check status on current accumulated output
             result = check_login_output(accumulated)
             if result:
@@ -263,10 +291,10 @@ def _monitor_login_pty():
                     auth_session.two_factor_type = result.get("two_factor_type", "email")
 
                     # If upfront code is available and hasn't been sent yet, inject immediately!
-                    if auth_session.pending_code and not upfront_code_sent:
+                    if auth_session.pending_code:
                         clean_code = auth_session.pending_code
-                        upfront_code_sent = True
                         auth_session.pending_code = None
+                        auth_session.code_injected_at = len(accumulated)
                         try:
                             logger.info("Injecting upfront Steam Guard code into PTY prompt")
                             os.write(master_fd, f"{clean_code}\n".encode("utf-8"))
@@ -274,12 +302,6 @@ def _monitor_login_pty():
                             logger.error(f"Failed to write upfront code to PTY: {e}")
                         auth_session.status = "authenticating"
                         continue
-                    elif upfront_code_sent:
-                        # SteamCMD prompted for 2FA again after the upfront code was submitted
-                        # This indicates the code was rejected or expired!
-                        auth_session.status = "failed"
-                        auth_session.error_message = "Steam Guard code was incorrect or expired. Please check your Steam Mobile App and try again."
-                        break
                     else:
                         auth_session.status = "awaiting_2fa"
                         # Keep thread reading so when submit_2fa_code writes to master_fd,
@@ -333,6 +355,7 @@ def submit_2fa_code(code: str) -> Dict[str, Any]:
     if auth_session.process and auth_session.process.poll() is None and auth_session.master_fd:
         try:
             auth_session.status = "authenticating"
+            auth_session.code_injected_at = len("".join(auth_session._output_buffer))
             os.write(auth_session.master_fd, f"{clean_code}\n".encode("utf-8"))
             start_time = time.time()
             while time.time() - start_time < 12.0:

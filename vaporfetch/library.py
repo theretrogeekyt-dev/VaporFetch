@@ -94,9 +94,16 @@ KNOWN_TOOLS: Dict[int, str] = {
     225: "Team Fortress 2 Dedicated Server",
     245: "Counter-Strike: Source Dedicated Server",
     255: "Day of Defeat: Source Dedicated Server",
-    480: "Spacewar",
-    1007: "Steam Translation Server",
+    97: "Steam Translation Server",
     228980: "Steamworks Common Redistributables",
+    513: "Left 4 Dead Authoring Tools",
+    563: "Left 4 Dead 2 Authoring Tools",
+    564: "Left 4 Dead 2 Add-on Support",
+    575: "Dota 2 - English Depot",
+    576: "Dota 2 - Content Depot",
+    629: "Portal 2 Authoring Tools - Beta",
+    644: "Portal 2 Publishing Tool",
+    746: "Counter-Strike: Global Offensive Authoring Tools",
     243750: "Source SDK Base 2013 Multiplayer",
     244630: "Source SDK Base 2013 Singleplayer",
     250820: "SteamVR",
@@ -171,11 +178,26 @@ def is_tool_or_non_game(appid: int, name: str) -> bool:
     ):
         return True
 
-    # 4. Non-game utility, SDK, runtime, content, and test packages
+    # 4. Authoring tools, publishing tools, editors, depots, SDKs, runtimes, test/betas
     tool_keywords = [
+        "authoring tool",
+        "authoring tools",
+        "publishing tool",
+        "publishing tools",
+        "add-on support",
+        "addon support",
+        "workshop tool",
+        "workshop tools",
+        "mod tool",
+        "mod tools",
+        "modding tool",
+        "modding tools",
+        "creation kit",
         "redistributable",
+        "redistributables",
         "soundtrack",
         "official soundtrack",
+        "original soundtrack",
         "bonus content",
         "artbook",
         "digital artbook",
@@ -183,10 +205,43 @@ def is_tool_or_non_game(appid: int, name: str) -> bool:
         "sdk",
         "benchmark",
         "translation server",
+        "content system",
     ]
     for kw in tool_keywords:
         if kw in lower:
             return True
+
+    # 5. Depot packages (e.g. "Dota 2 - English Depot", "Depot", "Content Depot")
+    if "depot" in lower:
+        return True
+
+    # 6. Standalone tools or editor packages (ends with 'tool', 'tools', 'editor')
+    if (
+        lower.endswith(" tool")
+        or lower.endswith(" tools")
+        or lower.endswith(" editor")
+        or " tools -" in lower
+        or " tool -" in lower
+        or " tools (" in lower
+        or " tool (" in lower
+    ):
+        return True
+
+    # 7. Betas, tests, prototypes, samples
+    if (
+        lower.endswith(" - beta")
+        or lower.endswith(" beta")
+        or lower.endswith(" (beta)")
+        or lower.endswith(" - test")
+        or lower.endswith(" test")
+        or lower.endswith(" (test)")
+        or " public test" in lower
+        or " public beta" in lower
+        or " closed beta" in lower
+        or " open beta" in lower
+        or " test server" in lower
+    ):
+        return True
 
     return False
 
@@ -444,6 +499,7 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
                     g["backup_size"] = status_info["size_formatted"]
                     g["backup_size_bytes"] = status_info["size_bytes"]
                     g["is_tool"] = is_tool_or_non_game(g["appid"], g["name"])
+                safe_write_json(LIBRARY_CACHE_FILE, games)
                 return games, ""
         except Exception:
             pass

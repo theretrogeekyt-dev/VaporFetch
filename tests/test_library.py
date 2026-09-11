@@ -55,6 +55,20 @@ class TestLibrary(unittest.TestCase):
         self.assertFalse(is_tool_or_non_game(1148590, "DOOM 64"))
         self.assertFalse(is_tool_or_non_game(2280, "DOOM + DOOM II"))
 
+        # Test items from user screenshot
+        self.assertTrue(is_tool_or_non_game(513, "Left 4 Dead Authoring Tools"))
+        self.assertTrue(is_tool_or_non_game(563, "Left 4 Dead 2 Authoring Tools"))
+        self.assertTrue(is_tool_or_non_game(564, "Left 4 Dead 2 Add-on Support"))
+        self.assertTrue(is_tool_or_non_game(575, "Dota 2 - English Depot"))
+        self.assertTrue(is_tool_or_non_game(629, "Portal 2 Authoring Tools - Beta"))
+        self.assertTrue(is_tool_or_non_game(644, "Portal 2 Publishing Tool"))
+        self.assertFalse(is_tool_or_non_game(440, "Team Fortress 2"))
+        self.assertFalse(is_tool_or_non_game(500, "Left 4 Dead"))
+        self.assertFalse(is_tool_or_non_game(550, "Left 4 Dead 2"))
+        self.assertFalse(is_tool_or_non_game(570, "Dota 2"))
+        self.assertFalse(is_tool_or_non_game(620, "Portal 2"))
+        self.assertFalse(is_tool_or_non_game(730, "Counter-Strike 2"))
+
     def test_app_resolver_steamspy(self):
         from unittest.mock import patch, MagicMock
         import json

@@ -158,6 +158,17 @@ class TestSteamCMDParser(unittest.TestCase):
         self.assertIsNotNone(r11)
         self.assertEqual(r11["status"], "logged_in")
 
+        # Push approved with Steam compat timing post-logon output
+        push_approved_compat = (
+            "Please confirm the login in the Steam Mobile app on your phone.\n\n"
+            "Waiting for confirmation...OK\n"
+            "Waiting for client config...OK\n"
+            "Waiting for user info...Waiting for compat in post-logon took: 0.098357sOK\n"
+        )
+        r12 = check_login_output(push_approved_compat)
+        self.assertIsNotNone(r12)
+        self.assertEqual(r12["status"], "logged_in")
+
     def test_app_success_and_error(self):
         succ = "Success! App '730' fully installed."
         err = "ERROR! Failed to install app '730' (No subscription)"

@@ -431,7 +431,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (data.status === "logged_in") {
           stopPushPolling();
-          onAuthSuccess();
+          if (elements.pushStatusText) elements.pushStatusText.textContent = "Approval confirmed! Finishing sign-in...";
+          setTimeout(() => onAuthSuccess(), 300);
         } else if (data.status === "failed") {
           stopPushPolling();
           showDirectStep("credentials");
@@ -445,7 +446,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch (e) {
         // Ignore transient poll errors
       }
-    }, 2000);
+    }, 1000);
   }
 
   function stopPushPolling() {

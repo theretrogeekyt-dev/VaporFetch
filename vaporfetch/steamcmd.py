@@ -551,12 +551,33 @@ def _monitor_login_pty():
     accumulated = ""
 
     def _finish_login(accum_str: str) -> str:
-        log_steamcmd("Steam login authenticated. Requesting owned licenses...")
+        # Extract SteamID64 if Steam3 format [U:1:<acc_id>] is logged
+        steam_id = ""
+        m_u = re.search(r"\[U:1:([1-9][0-9]*)\]", accum_str)
+        if m_u:
+            try:
+                acc_id = int(m_u.group(1))
+                steam_id = str(76561197960265728 + acc_id)
+            except Exception:
+                pass
+
+        # Mark as logged in IMMEDIATELY so the frontend transitions instantly
+        save_current_session(auth_session.username, logged_in=True, steam_id=steam_id, auth_method="steamcmd")
+        try:
+            subprocess.run(["chmod", "-R", "a+rwX", str(DATA_DIR / "steam")], check=False)
+        except Exception:
+            pass
+        auth_session.status = "logged_in"
+        auth_session.prompt_message = ""
+        log_steamcmd(f"Steam authentication confirmed for '{auth_session.username}'. Logged in successfully.")
+
+        log_steamcmd("Requesting owned licenses from SteamCMD...")
         try:
             os.write(master_fd, b"licenses_print\n")
             read_start = time.time()
             got_licenses = False
-            while time.time() - read_start < 45.0:
+            last_recv_time = time.time()
+            while time.time() - read_start < 25.0:
                 if auth_session.process and auth_session.process.poll() is not None:
                     try:
                         r, _, _ = select.select([master_fd], [], [], 0.3)
@@ -573,6 +594,13 @@ def _monitor_login_pty():
 
                 r, _, _ = select.select([master_fd], [], [], 0.4)
                 if not r:
+                    if got_licenses and (time.time() - last_recv_time > 2.0):
+                        log_steamcmd("License stream finished (quiet period). Exiting SteamCMD...")
+                        try:
+                            os.write(master_fd, b"quit\n")
+                        except Exception:
+                            pass
+                        break
                     continue
                 try:
                     ch = os.read(master_fd, 4096).decode("utf-8", errors="replace")
@@ -581,22 +609,23 @@ def _monitor_login_pty():
                 if not ch:
                     break
                 accum_str += ch
+                last_recv_time = time.time()
                 for line in ch.splitlines():
                     if line.strip():
                         log_steamcmd(line.strip())
 
-                if "License packageID" in accum_str:
+                if "License packageID" in accum_str or "packageID" in accum_str:
                     got_licenses = True
 
                 # When license output finishes, SteamCMD prints the prompt "Steam>"
-                if got_licenses and accum_str.strip().endswith("Steam>"):
+                if got_licenses and ("Steam>" in ch or re.search(r"Steam>\s*$", accum_str)):
                     log_steamcmd("All licenses received. Exiting SteamCMD...")
                     try:
                         os.write(master_fd, b"quit\n")
                     except Exception:
                         pass
                     read_exit = time.time()
-                    while time.time() - read_exit < 5.0:
+                    while time.time() - read_exit < 3.0:
                         if auth_session.process and auth_session.process.poll() is not None:
                             break
                         time.sleep(0.1)
@@ -629,22 +658,6 @@ def _monitor_login_pty():
             pass
         auth_session.master_fd = None
 
-        # Extract SteamID64 if Steam3 format [U:1:<acc_id>] is logged
-        steam_id = ""
-        m_u = re.search(r"\[U:1:([1-9][0-9]*)\]", accum_str)
-        if m_u:
-            try:
-                acc_id = int(m_u.group(1))
-                steam_id = str(76561197960265728 + acc_id)
-            except Exception:
-                pass
-
-        save_current_session(auth_session.username, logged_in=True, steam_id=steam_id, auth_method="steamcmd")
-        try:
-            subprocess.run(["chmod", "-R", "a+rwX", str(DATA_DIR / "steam")], check=False)
-        except Exception:
-            pass
-        auth_session.status = "logged_in"
         return accum_str
 
     start_loop = time.time()

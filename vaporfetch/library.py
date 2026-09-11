@@ -406,11 +406,19 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
                     "or sign in with Password & Steam Guard."
                 )
         else:
-            cmd_app_ids = fetch_licenses(username)
-            if cmd_app_ids:
-                app_ids.update(cmd_app_ids)
-            else:
-                error_msg = auth_session.last_error or "SteamCMD returned 0 owned game licenses."
+            # If active login is currently streaming licenses in the background, wait for it!
+            if auth_session.fetching_licenses:
+                print(f"[VaporFetch] Login session is actively syncing licenses from SteamCMD. Waiting for completion...")
+                auth_session.license_event.wait(timeout=25.0)
+                if auth_session.owned_app_ids:
+                    app_ids.update(auth_session.owned_app_ids)
+
+            if not app_ids:
+                cmd_app_ids = fetch_licenses(username)
+                if cmd_app_ids:
+                    app_ids.update(cmd_app_ids)
+                else:
+                    error_msg = auth_session.last_error or "SteamCMD returned 0 owned game licenses."
 
     if not app_ids:
         # If refresh returned 0 licenses, preserve existing library cache if available

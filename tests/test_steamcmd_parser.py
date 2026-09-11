@@ -307,6 +307,34 @@ class TestSteamCMDParser(unittest.TestCase):
         self.assertEqual(res["status"], "failed")
         self.assertIn("password", res["error"].lower())
 
+    def test_fetch_licenses_waits_for_active_login_stream(self):
+        import time
+        import threading
+        from unittest.mock import patch
+        from vaporfetch.steamcmd import fetch_licenses, auth_session
+
+        auth_session.reset()
+        auth_session.username = "reaper360vr"
+        auth_session.fetching_licenses = True
+        auth_session.license_event.clear()
+        auth_session.owned_app_ids = {730, 440}
+
+        def simulate_finish():
+            time.sleep(0.05)
+            auth_session.fetching_licenses = False
+            auth_session.license_event.set()
+
+        t = threading.Thread(target=simulate_finish)
+        t.start()
+
+        with patch("subprocess.run") as mock_run:
+            app_ids = fetch_licenses("reaper360vr")
+            self.assertEqual(app_ids, {730, 440})
+            mock_run.assert_not_called()
+
+        t.join()
+        auth_session.reset()
+
     def test_fetch_licenses_without_password_and_no_cached_credentials(self):
         from unittest.mock import patch
         from vaporfetch.steamcmd import fetch_licenses, auth_session

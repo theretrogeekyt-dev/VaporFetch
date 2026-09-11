@@ -505,7 +505,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (elements.loginStepSuccess) elements.loginStepSuccess.style.display = "block";
 
     await fetchInitialStatus();
-    fetchLibrary(true);
+    fetchLibrary(false);
   }
 
   function showLoginError(msg) {

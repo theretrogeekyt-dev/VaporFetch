@@ -136,7 +136,10 @@ class SteamCMDAuthSession:
         self.two_factor_type: str = "email"
         self.error_message: str = ""
         self.prompt_message: str = ""
-        self.last_error: str = ""
+        self.fetching_licenses: bool = False
+        self.license_event = threading.Event()
+        self.license_event.set()
+        self.owned_app_ids: Set[int] = set()
         self.lock = threading.Lock()
         self._output_buffer: List[str] = []
 
@@ -164,9 +167,13 @@ class SteamCMDAuthSession:
             self.error_message = ""
             self.prompt_message = ""
             self.last_error = ""
+            self.fetching_licenses = False
+            self.license_event.set()
+            self.owned_app_ids = set()
             self._output_buffer = []
 
 auth_session = SteamCMDAuthSession()
+STEAMCMD_LOCK = threading.Lock()
 
 
 def get_current_session() -> Dict[str, Any]:
@@ -570,81 +577,88 @@ def _monitor_login_pty():
             pass
         auth_session.status = "logged_in"
         auth_session.prompt_message = ""
+        auth_session.fetching_licenses = True
+        auth_session.license_event.clear()
         log_steamcmd(f"Steam authentication confirmed for '{auth_session.username}'. Logged in successfully.")
 
-        log_steamcmd("Requesting owned licenses from SteamCMD...")
         try:
-            os.write(master_fd, b"licenses_print\n")
-            read_start = time.time()
-            got_licenses = False
-            last_recv_time = time.time()
-            while time.time() - read_start < 25.0:
-                if auth_session.process and auth_session.process.poll() is not None:
-                    try:
-                        r, _, _ = select.select([master_fd], [], [], 0.3)
-                        if r:
-                            ch = os.read(master_fd, 4096).decode("utf-8", errors="replace")
-                            if ch:
-                                accum_str += ch
-                                for line in ch.splitlines():
-                                    if line.strip():
-                                        log_steamcmd(line.strip())
-                    except Exception:
-                        pass
-                    break
+            log_steamcmd("Requesting owned licenses from SteamCMD...")
+            try:
+                os.write(master_fd, b"licenses_print\n")
+                read_start = time.time()
+                got_licenses = False
+                last_recv_time = time.time()
+                while time.time() - read_start < 25.0:
+                    if auth_session.process and auth_session.process.poll() is not None:
+                        try:
+                            r, _, _ = select.select([master_fd], [], [], 0.3)
+                            if r:
+                                ch = os.read(master_fd, 4096).decode("utf-8", errors="replace")
+                                if ch:
+                                    accum_str += ch
+                                    for line in ch.splitlines():
+                                        if line.strip():
+                                            log_steamcmd(line.strip())
+                        except Exception:
+                            pass
+                        break
 
-                r, _, _ = select.select([master_fd], [], [], 0.4)
-                if not r:
-                    if got_licenses and (time.time() - last_recv_time > 2.0):
-                        log_steamcmd("License stream finished (quiet period). Exiting SteamCMD...")
+                    r, _, _ = select.select([master_fd], [], [], 0.4)
+                    if not r:
+                        if got_licenses and (time.time() - last_recv_time > 2.0):
+                            log_steamcmd("License stream finished (quiet period). Exiting SteamCMD...")
+                            try:
+                                os.write(master_fd, b"quit\n")
+                            except Exception:
+                                pass
+                            break
+                        continue
+                    try:
+                        ch = os.read(master_fd, 4096).decode("utf-8", errors="replace")
+                    except OSError:
+                        break
+                    if not ch:
+                        break
+                    accum_str += ch
+                    last_recv_time = time.time()
+                    for line in ch.splitlines():
+                        if line.strip():
+                            log_steamcmd(line.strip())
+
+                    if "License packageID" in accum_str or "packageID" in accum_str:
+                        got_licenses = True
+
+                    # When license output finishes, SteamCMD prints the prompt "Steam>"
+                    if got_licenses and ("Steam>" in ch or re.search(r"Steam>\s*$", accum_str)):
+                        log_steamcmd("All licenses received. Exiting SteamCMD...")
                         try:
                             os.write(master_fd, b"quit\n")
                         except Exception:
                             pass
+                        read_exit = time.time()
+                        while time.time() - read_exit < 3.0:
+                            if auth_session.process and auth_session.process.poll() is not None:
+                                break
+                            time.sleep(0.1)
                         break
-                    continue
-                try:
-                    ch = os.read(master_fd, 4096).decode("utf-8", errors="replace")
-                except OSError:
-                    break
-                if not ch:
-                    break
-                accum_str += ch
-                last_recv_time = time.time()
-                for line in ch.splitlines():
-                    if line.strip():
-                        log_steamcmd(line.strip())
-
-                if "License packageID" in accum_str or "packageID" in accum_str:
-                    got_licenses = True
-
-                # When license output finishes, SteamCMD prints the prompt "Steam>"
-                if got_licenses and ("Steam>" in ch or re.search(r"Steam>\s*$", accum_str)):
-                    log_steamcmd("All licenses received. Exiting SteamCMD...")
-                    try:
-                        os.write(master_fd, b"quit\n")
-                    except Exception:
-                        pass
-                    read_exit = time.time()
-                    while time.time() - read_exit < 3.0:
-                        if auth_session.process and auth_session.process.poll() is not None:
-                            break
-                        time.sleep(0.1)
-                    break
-        except Exception as e:
-            logger.warning(f"Notice while reading licenses on login: {e}")
-
-        owned_app_ids = parse_licenses_output(accum_str)
-        log_steamcmd(f"Parsed {len(owned_app_ids)} owned game licenses from SteamCMD.")
-        if owned_app_ids:
-            try:
-                from vaporfetch.library import populate_and_cache_games
-                populate_and_cache_games(owned_app_ids)
-                log_steamcmd(f"Successfully cached {len(owned_app_ids)} games to local library.")
             except Exception as e:
-                logger.error(f"Error caching owned games: {e}")
-        else:
-            log_steamcmd("Warning: No owned game licenses found in output.")
+                logger.warning(f"Notice while reading licenses on login: {e}")
+
+            owned_app_ids = parse_licenses_output(accum_str)
+            auth_session.owned_app_ids = owned_app_ids
+            log_steamcmd(f"Parsed {len(owned_app_ids)} owned game licenses from SteamCMD.")
+            if owned_app_ids:
+                try:
+                    from vaporfetch.library import populate_and_cache_games
+                    populate_and_cache_games(owned_app_ids)
+                    log_steamcmd(f"Successfully cached {len(owned_app_ids)} games to local library.")
+                except Exception as e:
+                    logger.error(f"Error caching owned games: {e}")
+            else:
+                log_steamcmd("Warning: No owned game licenses found in output.")
+        finally:
+            auth_session.fetching_licenses = False
+            auth_session.license_event.set()
 
         try:
             if auth_session.process and auth_session.process.poll() is None:
@@ -1001,76 +1015,91 @@ def _run_steamcmd_capture(cmd: List[str], pwd: Optional[str] = None, timeout: fl
 
 def fetch_licenses(username: str) -> Set[int]:
     """Run `licenses_print` in SteamCMD to obtain owned game AppIDs."""
-    if auth_session.process and auth_session.process.poll() is None:
-        try:
-            auth_session.process.terminate()
-            auth_session.process.wait(timeout=2)
-        except Exception:
-            pass
-    if auth_session.master_fd:
-        try:
-            os.close(auth_session.master_fd)
-        except Exception:
-            pass
-        auth_session.master_fd = None
+    # If the login session is actively streaming licenses in the background, wait for it!
+    if auth_session.fetching_licenses:
+        log_steamcmd(f"SteamCMD is already actively querying licenses for '{username}'. Waiting for stream to complete...")
+        auth_session.license_event.wait(timeout=25.0)
+        if auth_session.owned_app_ids:
+            return auth_session.owned_app_ids
+        if LIBRARY_CACHE_FILE.exists():
+            try:
+                with open(LIBRARY_CACHE_FILE, "r", encoding="utf-8") as f:
+                    games = json.load(f)
+                    return {g["appid"] for g in games if "appid" in g}
+            except Exception:
+                pass
 
-    steamcmd_bin = find_steamcmd_path()
-    pwd = auth_session.pending_password if auth_session.username == username else None
+    with STEAMCMD_LOCK:
+        if auth_session.process and auth_session.process.poll() is None:
+            try:
+                auth_session.process.terminate()
+                auth_session.process.wait(timeout=2)
+            except Exception:
+                pass
+        if auth_session.master_fd:
+            try:
+                os.close(auth_session.master_fd)
+            except Exception:
+                pass
+            auth_session.master_fd = None
 
-    # If we have neither an in-memory password nor cached credentials on disk, do not run SteamCMD blindly
-    if not pwd and not has_steamcmd_cached_credentials(username):
-        auth_session.last_error = "Steam credentials expired or missing. Please click 'Re-authenticate with Steam' to sign in."
-        log_steamcmd(f"Notice: No active password or SteamCMD cached credentials for '{username}'. Re-authentication required.")
-        return set()
+        steamcmd_bin = find_steamcmd_path()
+        pwd = auth_session.pending_password if auth_session.username == username else None
 
-    cmd = [steamcmd_bin, "+login", username]
-    # Allow passwords with dashes, dots, and special characters (avoid only '+' or '-' command/flag prefixes)
-    if pwd and not pwd.startswith("+") and not pwd.startswith("-") and " " not in pwd:
-        cmd.append(pwd)
-    cmd.extend(["+licenses_print", "+quit"])
-
-    log_steamcmd(f"Querying SteamCMD licenses for user '{username}'...")
-
-    try:
-        out = _run_steamcmd_capture(cmd, pwd=pwd, timeout=60.0)
-        for line in out.splitlines():
-            if line.strip():
-                log_steamcmd(line.strip())
-
-        app_ids = parse_licenses_output(out)
-        print(f"[VaporFetch] licenses_print for {username} completed. Output {len(out)} bytes, parsed {len(app_ids)} AppIDs.")
-
-        # If no password was provided on CLI and SteamCMD failed or prompted for one
-        if not pwd and ("cached credentials not found" in out.lower() or "password:" in out.lower() or "invalid password" in out.lower() or "not logged on" in out.lower()):
+        # If we have neither an in-memory password nor cached credentials on disk, do not run SteamCMD blindly
+        if not pwd and not has_steamcmd_cached_credentials(username):
             auth_session.last_error = "Steam credentials expired or missing. Please click 'Re-authenticate with Steam' to sign in."
-            log_steamcmd("SteamCMD: Cached credentials expired or not found. Re-authentication required.")
+            log_steamcmd(f"Notice: No active password or SteamCMD cached credentials for '{username}'. Re-authentication required.")
             return set()
 
-        # Determine if any specific error occurred
-        login_res = check_login_output(out)
-        if login_res and login_res.get("status") == "failed":
-            auth_session.last_error = login_res.get("error", "Steam authentication failed.")
-            log_steamcmd(f"SteamCMD error: {auth_session.last_error}")
-        elif login_res and login_res.get("status") == "awaiting_2fa":
-            auth_session.last_error = "Steam Guard code required. Click 'Re-authenticate with Steam' to sign in."
-            log_steamcmd(f"SteamCMD notice: {auth_session.last_error}")
-        elif not app_ids:
-            if "not logged on" in out.lower() or "no connection" in out.lower():
-                auth_session.last_error = "SteamCMD was not logged on or connection lost. Please re-authenticate."
-            else:
-                auth_session.last_error = "SteamCMD completed but no owned game licenses were found on this account."
-            log_steamcmd(f"SteamCMD notice: {auth_session.last_error}")
-        else:
-            auth_session.last_error = ""
-            log_steamcmd(f"Successfully discovered {len(app_ids)} owned games from SteamCMD.")
+        cmd = [steamcmd_bin, "+login", username]
+        # Allow passwords with dashes, dots, and special characters (avoid only '+' or '-' command/flag prefixes)
+        if pwd and not pwd.startswith("+") and not pwd.startswith("-") and " " not in pwd:
+            cmd.append(pwd)
+        cmd.extend(["+licenses_print", "+quit"])
 
-        return app_ids
-    except Exception as e:
-        err = f"Failed to execute SteamCMD: {e}"
-        auth_session.last_error = err
-        logger.error(err)
-        log_steamcmd(err)
-        return set()
+        log_steamcmd(f"Querying SteamCMD licenses for user '{username}'...")
+
+        try:
+            out = _run_steamcmd_capture(cmd, pwd=pwd, timeout=60.0)
+            for line in out.splitlines():
+                if line.strip():
+                    log_steamcmd(line.strip())
+
+            app_ids = parse_licenses_output(out)
+            print(f"[VaporFetch] licenses_print for {username} completed. Output {len(out)} bytes, parsed {len(app_ids)} AppIDs.")
+
+            # If no password was provided on CLI and SteamCMD failed or prompted for one
+            if not pwd and ("cached credentials not found" in out.lower() or "password:" in out.lower() or "invalid password" in out.lower() or "not logged on" in out.lower()):
+                auth_session.last_error = "Steam credentials expired or missing. Please click 'Re-authenticate with Steam' to sign in."
+                log_steamcmd("SteamCMD: Cached credentials expired or not found. Re-authentication required.")
+                return set()
+
+            # Determine if any specific error occurred
+            login_res = check_login_output(out)
+            if login_res and login_res.get("status") == "failed":
+                auth_session.last_error = login_res.get("error", "Steam authentication failed.")
+                log_steamcmd(f"SteamCMD error: {auth_session.last_error}")
+            elif login_res and login_res.get("status") == "awaiting_2fa":
+                auth_session.last_error = "Steam Guard code required. Click 'Re-authenticate with Steam' to sign in."
+                log_steamcmd(f"SteamCMD notice: {auth_session.last_error}")
+            elif not app_ids:
+                if "not logged on" in out.lower() or "no connection" in out.lower():
+                    auth_session.last_error = "SteamCMD was not logged on or connection lost. Please re-authenticate."
+                else:
+                    auth_session.last_error = "SteamCMD completed but no owned game licenses were found on this account."
+                log_steamcmd(f"SteamCMD notice: {auth_session.last_error}")
+            else:
+                auth_session.last_error = ""
+                log_steamcmd(f"Successfully discovered {len(app_ids)} owned games from SteamCMD.")
+
+            return app_ids
+        except Exception as e:
+            err = f"Failed to execute SteamCMD: {e}"
+            auth_session.last_error = err
+            logger.error(err)
+            log_steamcmd(err)
+            return set()
 
 
 def parse_progress_line(line: str) -> Optional[Dict[str, Any]]:

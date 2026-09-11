@@ -78,7 +78,7 @@ COMMON_STEAM_APPS: Dict[int, str] = {
     2050650: "Resident Evil 4",
 }
 
-# Known internal Steam tools, dedicated servers, and engine packages
+# Known internal Steam tools, dedicated servers, runtimes, and engine packages
 KNOWN_TOOLS: Dict[int, str] = {
     4: "Source SDK Base",
     5: "Dedicated Server",
@@ -94,9 +94,101 @@ KNOWN_TOOLS: Dict[int, str] = {
     225: "Team Fortress 2 Dedicated Server",
     245: "Counter-Strike: Source Dedicated Server",
     255: "Day of Defeat: Source Dedicated Server",
+    480: "Spacewar",
     1007: "Steam Translation Server",
     228980: "Steamworks Common Redistributables",
+    243750: "Source SDK Base 2013 Multiplayer",
+    244630: "Source SDK Base 2013 Singleplayer",
+    250820: "SteamVR",
+    323910: "SteamVR Performance Test",
+    356530: "SteamVR Workshop Tools",
+    858210: "Steam Linux Runtime",
+    1070560: "Steam Linux Runtime",
+    1391110: "Steam Linux Runtime - Soldier",
+    1628350: "Steam Linux Runtime - Sniper",
+    1807930: "Steam Linux Runtime - Medic",
+    896660: "Proton 3.7",
+    961940: "Proton 3.16",
+    1054830: "Proton 4.2",
+    1113280: "Proton 4.11",
+    1245040: "Proton 5.0",
+    1420170: "Proton 5.13",
+    1493710: "Proton Experimental",
+    1580130: "Proton 6.3",
+    1887720: "Proton 7.0",
+    2180100: "Proton Hotfix",
+    2230260: "Proton Next",
+    2348520: "Proton 8.0",
+    2805730: "Proton 9.0",
 }
+
+
+def is_tool_or_non_game(appid: int, name: str) -> bool:
+    """
+    Determine whether an AppID or title corresponds to an internal tool,
+    unreleased/unnamed item, dedicated server, runtime, or non-game utility package.
+    """
+    if appid in KNOWN_TOOLS:
+        return True
+
+    clean = (name or "").strip()
+    if not clean:
+        return True
+
+    # 1. Unresolved, placeholder, or unknown items
+    if clean.startswith("Steam App ") or clean.startswith("SteamDB Unknown App"):
+        return True
+    if re.match(r"^App\s*#?\d+$", clean, re.IGNORECASE) or re.match(r"^app_\d+$", clean, re.IGNORECASE):
+        return True
+
+    lower = clean.lower()
+
+    # 2. Known internal Valve / Steam keywords
+    if (
+        lower in ("winui2", "steam client", "steamworks common redistributables", "spacewar")
+        or lower.startswith("steam client")
+        or lower.startswith("steam linux runtime")
+        or lower.startswith("proton ")
+        or lower == "proton"
+        or lower.startswith("steamworks ")
+        or lower.startswith("source sdk")
+        or lower.startswith("steamvr")
+        or lower.startswith("unreleased ")
+        or lower.startswith("valve internal ")
+        or lower.startswith("steam test ")
+        or lower.startswith("test app ")
+    ):
+        return True
+
+    # 3. Dedicated Servers & Server Packages
+    if (
+        "dedicated server" in lower
+        or "linux dedicated server" in lower
+        or lower.endswith(" server")
+        or " - server" in lower
+        or " server " in lower
+        or lower.endswith(" ds")
+    ):
+        return True
+
+    # 4. Non-game utility, SDK, runtime, content, and test packages
+    tool_keywords = [
+        "redistributable",
+        "soundtrack",
+        "official soundtrack",
+        "bonus content",
+        "artbook",
+        "digital artbook",
+        "playtest",
+        "sdk",
+        "benchmark",
+        "translation server",
+    ]
+    for kw in tool_keywords:
+        if kw in lower:
+            return True
+
+    return False
 
 class AppResolver:
     """Resolves Steam AppIDs to game titles using local cache, SteamSpy, and Steam Web API."""
@@ -293,12 +385,7 @@ def populate_and_cache_games(app_ids: Set[int]) -> List[Dict[str, Any]]:
     games = []
     for aid in sorted(app_ids):
         name = resolver.resolve_name(aid)
-        is_tool = (
-            aid in KNOWN_TOOLS
-            or "dedicated server" in name.lower()
-            or name.lower().startswith("steam client")
-            or name.lower() in ("winui2", "steamworks common redistributables")
-        )
+        is_tool = is_tool_or_non_game(aid, name)
         status_info = check_backup_status(name, aid)
         games.append({
             "appid": aid,
@@ -350,12 +437,13 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
         try:
             with open(LIBRARY_CACHE_FILE, "r", encoding="utf-8") as f:
                 games = json.load(f)
-                # Update dynamic backup status
+                # Update dynamic backup status and tool classification
                 for g in games:
                     status_info = check_backup_status(g["name"], g["appid"])
                     g["backup_status"] = status_info["status"]
                     g["backup_size"] = status_info["size_formatted"]
                     g["backup_size_bytes"] = status_info["size_bytes"]
+                    g["is_tool"] = is_tool_or_non_game(g["appid"], g["name"])
                 return games, ""
         except Exception:
             pass

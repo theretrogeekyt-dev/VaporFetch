@@ -787,8 +787,8 @@ document.addEventListener("DOMContentLoaded", () => {
       if (statusFilter === "tools") return !!game.is_tool;
       if (statusFilter === "all_incl_tools") return true;
 
-      // In default game views, hide internal tools unless user explicitly searched
-      if (!query && game.is_tool) return false;
+      // In game-focused views ("all", "downloaded", "not_downloaded"), exclude tools/internal items
+      if (game.is_tool) return false;
 
       if (statusFilter === "downloaded") return game.backup_status === "downloaded";
       if (statusFilter === "not_downloaded") return game.backup_status !== "downloaded";

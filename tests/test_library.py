@@ -37,7 +37,7 @@ class TestLibrary(unittest.TestCase):
         self.assertEqual(resolver.resolve_name(99999999), "Steam App 99999999")
 
     def test_populate_and_cache_games(self):
-        from vaporfetch.library import populate_and_cache_games
+        from vaporfetch.library import populate_and_cache_games, is_tool_or_non_game
         games = populate_and_cache_games({730, 400, 5, 90})
         self.assertEqual(len(games), 4)
         games_by_id = {g["appid"]: g for g in games}
@@ -45,6 +45,15 @@ class TestLibrary(unittest.TestCase):
         self.assertFalse(games_by_id[400]["is_tool"])
         self.assertTrue(games_by_id[5]["is_tool"])
         self.assertTrue(games_by_id[90]["is_tool"])
+
+        # Test tool / internal / runtime classifications
+        self.assertTrue(is_tool_or_non_game(1493710, "Proton Experimental"))
+        self.assertTrue(is_tool_or_non_game(1070560, "Steam Linux Runtime"))
+        self.assertTrue(is_tool_or_non_game(480, "Spacewar"))
+        self.assertTrue(is_tool_or_non_game(99999999, "Steam App 99999999"))
+        self.assertTrue(is_tool_or_non_game(12345, "DOOM Eternal (Official Soundtrack)"))
+        self.assertFalse(is_tool_or_non_game(1148590, "DOOM 64"))
+        self.assertFalse(is_tool_or_non_game(2280, "DOOM + DOOM II"))
 
     def test_app_resolver_steamspy(self):
         from unittest.mock import patch, MagicMock

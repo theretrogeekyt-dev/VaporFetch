@@ -348,7 +348,34 @@ class TestSteamCMDParser(unittest.TestCase):
         self.assertTrue(auth_session.password_injected)
         self.assertIn(b"MyComplex+Password!123\n", written)
 
+    def test_has_steamcmd_cached_credentials_prevents_connect_cache_false_positive(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from vaporfetch.steamcmd import has_steamcmd_cached_credentials
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmppath = Path(tmpdir)
+            cfg_dir = tmppath / "Steam" / "config"
+            cfg_dir.mkdir(parents=True)
+            cfg_file = cfg_dir / "config.vdf"
+            # Steam creates ConnectCache on first run without any user logged in
+            cfg_file.write_text('"InstallConfigStore" { "Software" { "Valve" { "Steam" { "ConnectCache" {} } } } }', encoding="utf-8")
+
+            with patch("vaporfetch.steamcmd.Path.home", return_value=tmppath), \
+                 patch("vaporfetch.steamcmd.DATA_DIR", tmppath):
+                # reaper360vr is NOT in this config, so it must return False!
+                self.assertFalse(has_steamcmd_cached_credentials("reaper360vr"))
+
+            # Now write reaper360vr account
+            cfg_file.write_text('"InstallConfigStore" { "Software" { "Valve" { "Steam" { "Accounts" { "reaper360vr" {} } } } } }', encoding="utf-8")
+            with patch("vaporfetch.steamcmd.Path.home", return_value=tmppath), \
+                 patch("vaporfetch.steamcmd.DATA_DIR", tmppath):
+                self.assertTrue(has_steamcmd_cached_credentials("reaper360vr"))
+                self.assertFalse(has_steamcmd_cached_credentials("otheruser"))
+
 if __name__ == "__main__":
     unittest.main()
+
 
 

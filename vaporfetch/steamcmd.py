@@ -181,7 +181,7 @@ def save_current_session(username: str, logged_in: bool = True, steam_id: str = 
 
 
 def has_steamcmd_cached_credentials(username: str = "") -> bool:
-    """Check if SteamCMD has existing cached login tokens on disk."""
+    """Check if SteamCMD has existing cached login tokens on disk for username."""
     search_dirs = [
         Path.home() / "Steam",
         Path.home() / ".steam",
@@ -192,23 +192,30 @@ def has_steamcmd_cached_credentials(username: str = "") -> bool:
         DATA_DIR / "steam_root",
         DATA_DIR / "steam_share",
     ]
+    uname = username.strip().lower() if username else ""
     for base in search_dirs:
         # 1. Check loginusers.vdf
         for cand in [base / "config" / "loginusers.vdf", base / "loginusers.vdf"]:
             if cand.exists():
                 try:
                     text = cand.read_text(encoding="utf-8", errors="ignore")
-                    if not username or username.lower() in text.lower():
+                    if uname:
+                        if uname in text.lower() or f'"{uname}"' in text.lower():
+                            return True
+                    elif "accountname" in text.lower() or "personaname" in text.lower():
                         return True
                 except Exception:
                     pass
 
-        # 2. Check config.vdf
+        # 2. Check config.vdf (Only check for user Accounts section, NOT generic ConnectCache)
         for cand in [base / "config" / "config.vdf", base / "config.vdf"]:
             if cand.exists():
                 try:
                     text = cand.read_text(encoding="utf-8", errors="ignore")
-                    if "ConnectCache" in text or "Accounts" in text or (username and username.lower() in text.lower()):
+                    if uname:
+                        if uname in text.lower() or f'"{uname}"' in text.lower():
+                            return True
+                    elif '"Accounts"' in text:
                         return True
                 except Exception:
                     pass
@@ -217,8 +224,8 @@ def has_steamcmd_cached_credentials(username: str = "") -> bool:
         ud = base / "userdata"
         if ud.is_dir():
             try:
-                subdirs = [d for d in ud.iterdir() if d.is_dir() and d.name.isdigit()]
-                if subdirs:
+                subdirs = [d for d in ud.iterdir() if d.is_dir() and d.name.isdigit() and d.name != "0"]
+                if not uname and subdirs:
                     return True
             except Exception:
                 pass
@@ -529,7 +536,7 @@ def _monitor_login_pty():
                     log_steamcmd(line.strip())
 
             # Check for interactive password prompt in accumulated output
-            if not auth_session.password_injected and re.search(r"(?:^|\n|\r|[ ;:\.])[Pp]assword:\s*$", accumulated):
+            if not auth_session.password_injected and re.search(r"(?:^|[\r\n])[^\r\n]*?[Pp]assword:\s*", accumulated):
                 if auth_session.pending_password:
                     auth_session.password_injected = True
                     log_steamcmd("Submitting password securely to SteamCMD interactive prompt...")

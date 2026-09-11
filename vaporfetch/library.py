@@ -3,6 +3,7 @@ import re
 import json
 import time
 import urllib.request
+import urllib.parse
 import urllib.error
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Set
@@ -226,8 +227,40 @@ def get_library(force_refresh: bool = False) -> List[Dict[str, Any]]:
     if not username:
         return []
 
-    # Refresh licenses via SteamCMD
-    app_ids = fetch_licenses(username)
+    app_ids: Set[int] = set()
+
+    # 1. If we have access_token or api_key + steam_id, try fetching games from Steam Web API
+    access_token = session.get("access_token")
+    steam_id = session.get("steam_id")
+    api_key = load_settings().get("api_key")
+
+    if steam_id and (access_token or api_key):
+        try:
+            query = {"steamid": steam_id, "include_appinfo": 1, "include_played_free_games": 1}
+            if access_token:
+                query["access_token"] = access_token
+            elif api_key:
+                query["key"] = api_key
+            url = f"https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?{urllib.parse.urlencode(query)}"
+            req = urllib.request.Request(url, headers={"User-Agent": "VaporFetch/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                for game in data.get("response", {}).get("games", []):
+                    aid = game.get("appid")
+                    name = game.get("name")
+                    if aid:
+                        app_ids.add(int(aid))
+                        if name:
+                            resolver.app_map[int(aid)] = name
+        except Exception as e:
+            print(f"[VaporFetch] Notice: Web API GetOwnedGames query: {e}")
+
+    # 2. Also try SteamCMD licenses if not populated via Web API
+    if not app_ids:
+        cmd_app_ids = fetch_licenses(username)
+        if cmd_app_ids:
+            app_ids.update(cmd_app_ids)
+
     if not app_ids:
         return []
 

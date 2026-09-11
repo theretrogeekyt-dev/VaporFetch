@@ -28,6 +28,8 @@ from vaporfetch.steamcmd import (
     submit_2fa_code,
     clear_session,
     auth_session,
+    begin_qr_login,
+    poll_qr_login,
 )
 from vaporfetch.library import (
     get_library,
@@ -49,6 +51,10 @@ if FastAPI is not None:
 
     class TwoFactorRequest(BaseModel):
         code: str
+
+    class QRPollRequest(BaseModel):
+        client_id: str
+        request_id: str
 
     class QueueAddRequest(BaseModel):
         appid: Optional[int] = None
@@ -121,6 +127,20 @@ if FastAPI is not None:
             raise HTTPException(status_code=400, detail="Code is required")
         result = submit_2fa_code(payload.code.strip())
         return result
+
+    @app.post("/api/login/qr/begin")
+    async def qr_begin_endpoint():
+        res = begin_qr_login()
+        if res.get("status") == "failed":
+            raise HTTPException(status_code=500, detail=res.get("error", "Failed to start QR session"))
+        return res
+
+    @app.post("/api/login/qr/poll")
+    async def qr_poll_endpoint(payload: QRPollRequest):
+        if not payload.client_id or not payload.request_id:
+            raise HTTPException(status_code=400, detail="client_id and request_id are required")
+        res = poll_qr_login(payload.client_id.strip(), payload.request_id.strip())
+        return res
 
     @app.post("/api/logout")
     async def logout_endpoint():

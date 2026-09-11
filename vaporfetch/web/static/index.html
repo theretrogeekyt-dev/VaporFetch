@@ -257,45 +257,69 @@
         </div>
 
         <div class="modal-body">
-          <!-- Step 1: Username & Password -->
-          <div id="loginStepCredentials">
-            <p class="modal-info">Log into your Steam account through SteamCMD to browse and backup your owned games.</p>
-            <div class="form-group">
-              <label for="loginUsername">Steam Username:</label>
-              <input type="text" id="loginUsername" class="text-input" placeholder="Steam account username" required autocomplete="username">
+          <!-- Auth Mode Selection Tabs -->
+          <div class="auth-mode-tabs" id="authModeTabs">
+            <button class="auth-mode-tab active" id="authTabPassword" type="button">🔑 Password & 2FA</button>
+            <button class="auth-mode-tab" id="authTabQR" type="button">📱 Steam QR Code</button>
+          </div>
+
+          <!-- Mode 1: Password & Steam Guard -->
+          <div id="authPanelPassword">
+            <!-- Step 1: Username & Password -->
+            <div id="loginStepCredentials">
+              <p class="modal-info">Log into your Steam account through SteamCMD to browse and backup your owned games.</p>
+              <div class="form-group">
+                <label for="loginUsername">Steam Username:</label>
+                <input type="text" id="loginUsername" class="text-input" placeholder="Steam account username" required autocomplete="username">
+              </div>
+              <div class="form-group">
+                <label for="loginPassword">Steam Password:</label>
+                <input type="password" id="loginPassword" class="text-input" placeholder="Password" autocomplete="current-password">
+                <small class="form-hint">Leave blank if you previously logged in and have remembered credentials.</small>
+              </div>
+              <div class="form-group">
+                <label for="loginSteamGuard">Steam Guard Code (Optional / Faster Login):</label>
+                <input type="text" id="loginSteamGuard" class="text-input code-input" placeholder="e.g. R4NDM" maxlength="10" autocomplete="off">
+                <small class="form-hint">Have your Steam Mobile App open? Enter the 5-digit code here to sign in instantly before it expires!</small>
+              </div>
+              <div id="loginError" class="alert alert-error" style="display: none;"></div>
+              <div class="modal-footer">
+                <button class="btn btn-secondary" id="loginCancelBtn">Cancel</button>
+                <button class="btn btn-primary" id="loginSubmitBtn">Sign In</button>
+              </div>
             </div>
-            <div class="form-group">
-              <label for="loginPassword">Steam Password:</label>
-              <input type="password" id="loginPassword" class="text-input" placeholder="Password" autocomplete="current-password">
-              <small class="form-hint">Leave blank if you previously logged in and have remembered credentials.</small>
-            </div>
-            <div class="form-group">
-              <label for="loginSteamGuard">Steam Guard Code (Optional / Faster Login):</label>
-              <input type="text" id="loginSteamGuard" class="text-input code-input" placeholder="e.g. R4NDM" maxlength="10" autocomplete="off">
-              <small class="form-hint">Have your Steam Mobile App open? Enter the 5-digit code here to sign in instantly before it expires!</small>
-            </div>
-            <div id="loginError" class="alert alert-error" style="display: none;"></div>
-            <div class="modal-footer">
-              <button class="btn btn-secondary" id="loginCancelBtn">Cancel</button>
-              <button class="btn btn-primary" id="loginSubmitBtn">Sign In</button>
+
+            <!-- Step 2: Steam Guard 2FA Prompt -->
+            <div id="loginStep2FA" style="display: none;">
+              <div class="alert alert-info">
+                <span class="alert-icon">🛡️</span>
+                <span id="twoFactorPromptText">Enter Steam Guard 2FA Code</span>
+              </div>
+              <div class="form-group">
+                <label for="twoFactorCode">Steam Guard Code:</label>
+                <input type="text" id="twoFactorCode" class="text-input code-input" placeholder="e.g. R4NDM" maxlength="10" autofocus>
+                <small class="form-hint">Tip: If the code on your phone is about to expire, wait 2–3 seconds for a fresh code, then enter it.</small>
+              </div>
+              <div id="twoFactorError" class="alert alert-error" style="display: none;"></div>
+              <div class="modal-footer">
+                <button class="btn btn-secondary" id="twoFactorCancelBtn">Cancel</button>
+                <button class="btn btn-primary" id="twoFactorSubmitBtn">Verify & Sign In</button>
+              </div>
             </div>
           </div>
 
-          <!-- Step 2: Steam Guard 2FA Prompt -->
-          <div id="loginStep2FA" style="display: none;">
-            <div class="alert alert-info">
-              <span class="alert-icon">🛡️</span>
-              <span id="twoFactorPromptText">Enter Steam Guard 2FA Code</span>
+          <!-- Mode 2: Steam Mobile QR Code -->
+          <div id="authPanelQR" style="display: none;">
+            <p class="modal-info">Open the <strong>Steam Mobile App</strong> on your phone, tap <strong>Steam Guard</strong>, and scan the QR code below.</p>
+            <div class="qr-container">
+              <div id="qrLoading" class="qr-loading">Generating secure QR code from Steam...</div>
+              <img id="qrImage" class="qr-image" style="display: none;" alt="Steam Login QR Code" />
+              <div id="qrStatusText" class="qr-status-text">Waiting for scan...</div>
+              <button class="btn btn-secondary btn-sm" id="qrRefreshBtn" style="margin-top: 8px;">🔄 Refresh QR Code</button>
             </div>
-            <div class="form-group">
-              <label for="twoFactorCode">Steam Guard Code:</label>
-              <input type="text" id="twoFactorCode" class="text-input code-input" placeholder="e.g. R4NDM" maxlength="10" autofocus>
-              <small class="form-hint">Tip: If the code on your phone is about to expire, wait 2–3 seconds for a fresh code, then enter it.</small>
-            </div>
-            <div id="twoFactorError" class="alert alert-error" style="display: none;"></div>
+            <div id="qrError" class="alert alert-error" style="display: none; margin-top: 10px;"></div>
             <div class="modal-footer">
-              <button class="btn btn-secondary" id="twoFactorCancelBtn">Cancel</button>
-              <button class="btn btn-primary" id="twoFactorSubmitBtn">Verify & Sign In</button>
+              <button class="btn btn-secondary" id="qrCancelBtn">Cancel</button>
             </div>
           </div>
 

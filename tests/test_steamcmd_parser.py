@@ -157,6 +157,63 @@ class TestSteamCMDParser(unittest.TestCase):
             self.assertIn("secretpass", called_cmd)
             mock_thread.return_value.start.assert_called_once()
 
+    def test_begin_and_poll_qr_login(self):
+        from unittest.mock import patch, MagicMock
+        from vaporfetch.steamcmd import begin_qr_login, poll_qr_login, auth_session
+        import json
+
+        # 1. Test begin_qr_login
+        mock_resp_begin = MagicMock()
+        mock_resp_begin.__enter__.return_value = mock_resp_begin
+        mock_resp_begin.read.return_value = json.dumps({
+            "response": {
+                "client_id": "123456789",
+                "challenge_url": "https://s.team/q/1/123456789",
+                "request_id": "abc==",
+                "interval": 3,
+            }
+        }).encode("utf-8")
+
+        with patch("urllib.request.urlopen", return_value=mock_resp_begin):
+            begin_res = begin_qr_login()
+            self.assertEqual(begin_res["status"], "success")
+            self.assertEqual(begin_res["client_id"], "123456789")
+            self.assertEqual(begin_res["challenge_url"], "https://s.team/q/1/123456789")
+
+        # 2. Test poll_qr_login waiting
+        mock_resp_poll_waiting = MagicMock()
+        mock_resp_poll_waiting.__enter__.return_value = mock_resp_poll_waiting
+        mock_resp_poll_waiting.read.return_value = json.dumps({
+            "response": {
+                "had_remote_interaction": True
+            }
+        }).encode("utf-8")
+
+        with patch("urllib.request.urlopen", return_value=mock_resp_poll_waiting):
+            poll_res = poll_qr_login("123456789", "abc==")
+            self.assertEqual(poll_res["status"], "waiting")
+            self.assertTrue(poll_res["had_remote_interaction"])
+
+        # 3. Test poll_qr_login approved
+        mock_resp_poll_approved = MagicMock()
+        mock_resp_poll_approved.__enter__.return_value = mock_resp_poll_approved
+        mock_resp_poll_approved.read.return_value = json.dumps({
+            "response": {
+                "account_name": "reaper360vr",
+                "steamid": "76561198000000000",
+                "access_token": "token123",
+                "refresh_token": "refresh123",
+            }
+        }).encode("utf-8")
+
+        with patch("urllib.request.urlopen", return_value=mock_resp_poll_approved), \
+             patch("vaporfetch.steamcmd.save_current_session") as mock_save:
+            poll_res2 = poll_qr_login("123456789", "abc==")
+            self.assertEqual(poll_res2["status"], "logged_in")
+            self.assertEqual(poll_res2["username"], "reaper360vr")
+            self.assertEqual(auth_session.status, "logged_in")
+            mock_save.assert_called_once()
+
 if __name__ == "__main__":
     unittest.main()
 

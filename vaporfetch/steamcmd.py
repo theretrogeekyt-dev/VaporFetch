@@ -7,6 +7,9 @@ import threading
 import time
 import json
 import logging
+import urllib.request
+import urllib.parse
+import urllib.error
 from pathlib import Path
 from typing import Dict, Any, List, Set, Optional, Callable
 
@@ -146,16 +149,100 @@ def get_current_session() -> Dict[str, Any]:
     return {"logged_in": False, "username": ""}
 
 
-def save_current_session(username: str, logged_in: bool = True, steam_id: str = "") -> None:
+def save_current_session(username: str, logged_in: bool = True, steam_id: str = "", **extra) -> None:
     """Save session information to disk."""
     data = {
         "username": username,
         "logged_in": logged_in,
         "steam_id": steam_id,
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        **extra,
     }
     with open(SESSION_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
+
+
+def begin_qr_login() -> Dict[str, Any]:
+    """
+    Initiate a Steam Mobile QR code login session via Steam's IAuthenticationService.
+    Returns client_id, challenge_url, request_id, and interval.
+    """
+    url = "https://api.steampowered.com/IAuthenticationService/BeginAuthSessionViaQR/v1/"
+    payload = urllib.parse.urlencode({
+        "device_friendly_name": "VaporFetch",
+        "platform_type": 1,
+        "website_id": "Community"
+    }).encode("utf-8")
+
+    req = urllib.request.Request(url, data=payload, headers={"User-Agent": "VaporFetch/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            res = data.get("response", {})
+            return {
+                "status": "success",
+                "client_id": res.get("client_id"),
+                "challenge_url": res.get("challenge_url"),
+                "request_id": res.get("request_id"),
+                "interval": res.get("interval", 3),
+            }
+    except Exception as e:
+        logger.error(f"Failed to begin QR auth session: {e}")
+        return {"status": "failed", "error": f"Failed to contact Steam authentication service: {e}"}
+
+
+def poll_qr_login(client_id: str, request_id: str) -> Dict[str, Any]:
+    """
+    Poll the status of a pending Steam Mobile QR code login session.
+    Returns 'logged_in', 'waiting', or 'expired'/'failed'.
+    """
+    url = "https://api.steampowered.com/IAuthenticationService/PollAuthSessionStatus/v1/"
+    payload = urllib.parse.urlencode({
+        "client_id": client_id,
+        "request_id": request_id
+    }).encode("utf-8")
+
+    req = urllib.request.Request(url, data=payload, headers={"User-Agent": "VaporFetch/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            res = data.get("response", {})
+
+            # If user has confirmed and approved the login on their phone:
+            if "refresh_token" in res or "access_token" in res or "account_name" in res:
+                account_name = res.get("account_name", "")
+                steam_id = res.get("steamid", "")
+                access_token = res.get("access_token", "")
+                refresh_token = res.get("refresh_token", "")
+
+                auth_session.status = "logged_in"
+                auth_session.username = account_name
+                save_current_session(
+                    username=account_name,
+                    logged_in=True,
+                    steam_id=steam_id,
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                    auth_method="qr",
+                )
+                return {
+                    "status": "logged_in",
+                    "username": account_name,
+                    "steam_id": steam_id,
+                }
+
+            # Still waiting for user interaction:
+            had_interaction = res.get("had_remote_interaction", False)
+            return {
+                "status": "waiting",
+                "had_remote_interaction": had_interaction,
+            }
+    except urllib.error.HTTPError as e:
+        if e.code in (400, 404, 410):
+            return {"status": "expired", "error": "QR code expired. Please refresh the QR code."}
+        return {"status": "failed", "error": f"Steam API error ({e.code})"}
+    except Exception as e:
+        return {"status": "failed", "error": str(e)}
 
 
 def clear_session() -> None:

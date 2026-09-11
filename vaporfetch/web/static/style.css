@@ -824,6 +824,81 @@ body {
   text-transform: uppercase;
 }
 
+/* Auth Mode Selection Tabs */
+.auth-mode-tabs {
+  display: flex;
+  gap: 8px;
+  background: rgba(11, 17, 30, 0.7);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 4px;
+  margin-bottom: 18px;
+}
+
+.auth-mode-tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.88rem;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.auth-mode-tab:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.auth-mode-tab.active {
+  background: var(--accent-cyan);
+  color: #0b111e;
+  font-weight: 700;
+}
+
+/* QR Code Display */
+.qr-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: #0b111e;
+  border: 1px solid var(--border-color);
+  border-radius: var(--card-radius);
+  margin: 10px 0;
+  text-align: center;
+}
+
+.qr-image {
+  width: 220px;
+  height: 220px;
+  border-radius: 8px;
+  border: 6px solid #ffffff;
+  background: #ffffff;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+  margin-bottom: 12px;
+}
+
+.qr-loading {
+  padding: 40px 20px;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.qr-status-text {
+  font-size: 0.95rem;
+  color: var(--text-main);
+  margin-top: 4px;
+}
+
 /* Empty / Loading States */
 .loading-spinner {
   text-align: center;

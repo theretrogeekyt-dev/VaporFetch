@@ -59,6 +59,25 @@ class TestSteamCMDParser(unittest.TestCase):
         self.assertIn(440, appids)
         self.assertEqual(len(appids), 3)
 
+    def test_parse_licenses_output_various_formats(self):
+        raw_output = """
+        License packageID 10:
+         - App : 730
+        License packageID 20:
+         - appid : 105600
+        License packageID 30:
+         - AppIDs: 400, 620
+        License packageID 40:
+         - AppID: 1086940
+        """
+        appids = parse_licenses_output(raw_output)
+        self.assertIn(730, appids)
+        self.assertIn(105600, appids)
+        self.assertIn(400, appids)
+        self.assertIn(620, appids)
+        self.assertIn(1086940, appids)
+        self.assertEqual(len(appids), 5)
+
     def test_2fa_detection(self):
         email_prompt = "Steam Guard code: "
         mobile_prompt = "Enter the current code from your Steam Guard Mobile Authenticator app: "
@@ -213,6 +232,27 @@ class TestSteamCMDParser(unittest.TestCase):
             self.assertEqual(poll_res2["username"], "reaper360vr")
             self.assertEqual(auth_session.status, "logged_in")
             mock_save.assert_called_once()
+
+    def test_fetch_licenses_uses_in_memory_password(self):
+        from unittest.mock import patch, MagicMock
+        from vaporfetch.steamcmd import fetch_licenses, auth_session
+
+        auth_session.username = "testuser"
+        auth_session.pending_password = "SecretPassword123"
+
+        mock_proc = MagicMock()
+        mock_proc.stdout = "License packageID 100:\n - Apps : 730, (1 in total)\n"
+
+        with patch("subprocess.run", return_value=mock_proc) as mock_run:
+            app_ids = fetch_licenses("testuser")
+            self.assertIn(730, app_ids)
+            # Verify that the command executed included username and password
+            called_cmd = mock_run.call_args[0][0]
+            self.assertIn("testuser", called_cmd)
+            self.assertIn("SecretPassword123", called_cmd)
+            self.assertIn("+licenses_print", called_cmd)
+
+        auth_session.reset()
 
 if __name__ == "__main__":
     unittest.main()

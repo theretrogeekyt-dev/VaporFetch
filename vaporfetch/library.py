@@ -292,19 +292,23 @@ def get_library(force_refresh: bool = False) -> List[Dict[str, Any]]:
 
     app_ids: Set[int] = set()
 
-    # 1. If we have steam_api_key + steam_id, query official Steam Web API GetOwnedGames
+    # 1. If we have steam_id and (access_token or api_key), query official Steam Web API GetOwnedGames
     steam_id = session.get("steam_id")
+    access_token = session.get("access_token")
     settings = load_settings()
     api_key = settings.get("steam_api_key") or settings.get("api_key") or os.environ.get("STEAM_API_KEY", "")
 
-    if steam_id and api_key:
+    if steam_id and (access_token or api_key):
         try:
             query = {
-                "key": api_key,
                 "steamid": steam_id,
                 "include_appinfo": 1,
                 "include_played_free_games": 1,
             }
+            if access_token:
+                query["access_token"] = access_token
+            if api_key:
+                query["key"] = api_key
             url = f"https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?{urllib.parse.urlencode(query)}"
             req = urllib.request.Request(url, headers={"User-Agent": "VaporFetch/1.0"})
             with urllib.request.urlopen(req, timeout=10) as resp:
@@ -316,6 +320,8 @@ def get_library(force_refresh: bool = False) -> List[Dict[str, Any]]:
                         app_ids.add(int(aid))
                         if name:
                             resolver.app_map[int(aid)] = name
+            if app_ids:
+                print(f"[VaporFetch] Retrieved {len(app_ids)} games via Steam Web API for SteamID {steam_id}")
         except Exception as e:
             print(f"[VaporFetch] Notice: Web API GetOwnedGames query: {e}")
 
@@ -326,6 +332,21 @@ def get_library(force_refresh: bool = False) -> List[Dict[str, Any]]:
             app_ids.update(cmd_app_ids)
 
     if not app_ids:
+        # If refresh returned 0 licenses, preserve existing library cache if available
+        if LIBRARY_CACHE_FILE.exists():
+            try:
+                with open(LIBRARY_CACHE_FILE, "r", encoding="utf-8") as f:
+                    cached_games = json.load(f)
+                    if cached_games:
+                        print(f"[VaporFetch] Refresh found 0 licenses; preserving {len(cached_games)} games from existing cache.")
+                        for g in cached_games:
+                            status_info = check_backup_status(g["name"], g["appid"])
+                            g["backup_status"] = status_info["status"]
+                            g["backup_size"] = status_info["size_formatted"]
+                            g["backup_size_bytes"] = status_info["size_bytes"]
+                        return cached_games
+            except Exception:
+                pass
         return []
 
     return populate_and_cache_games(app_ids)

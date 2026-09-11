@@ -23,8 +23,9 @@ RE_PROGRESS = re.compile(
 )
 RE_APP_SUCCESS = re.compile(r"Success! App '([0-9]+)' fully installed\.", re.IGNORECASE)
 RE_APP_ERROR = re.compile(r"ERROR! Failed to install app '([0-9]+)' \((.*?)\)", re.IGNORECASE)
-RE_LICENSES_APP = re.compile(r"Apps\s*:\s*([0-9, ]+)")
-RE_LICENSES_PKG = re.compile(r"License packageID\s+([0-9]+):")
+RE_LICENSES_APP = re.compile(r"(?:Apps?|AppIDs?)\s*:\s*([0-9, ]+)", re.IGNORECASE)
+RE_APPID_EXPLICIT = re.compile(r"\b(?:AppID|App)\s*[:\s]\s*(\d+)\b", re.IGNORECASE)
+RE_LICENSES_PKG = re.compile(r"License packageID\s+([0-9]+):", re.IGNORECASE)
 
 # 2FA prompts and result codes in SteamCMD
 RE_STEAM_GUARD = re.compile(
@@ -274,6 +275,7 @@ def start_login(username: str, password: Optional[str] = None, code: Optional[st
         cmd.extend(["+login", username, password])
     else:
         cmd.extend(["+login", username])
+    cmd.extend(["+licenses_print", "+quit"])
 
     try:
         master_fd, slave_fd = pty.openpty()
@@ -306,9 +308,9 @@ def start_login(username: str, password: Optional[str] = None, code: Optional[st
     thread.start()
 
     # Wait for initial outcome:
-    # If code was provided upfront, wait up to 15s for the full login flow to succeed
-    # If code was not provided, wait until awaiting_2fa is detected or 10s
-    timeout_secs = 15.0 if auth_session.pending_code else 10.0
+    # If code was provided upfront, wait up to 25s for the full login flow and licenses to complete
+    # If code was not provided, wait until awaiting_2fa is detected or 15s
+    timeout_secs = 25.0 if auth_session.pending_code else 15.0
     start_time = time.time()
     while time.time() - start_time < timeout_secs:
         if auth_session.status in ("logged_in", "failed"):
@@ -331,21 +333,34 @@ def _monitor_login_pty():
     accumulated = ""
 
     def _finish_login(accum_str: str) -> str:
-        auth_session.status = "logged_in"
-        auth_session.pending_password = None
-        save_current_session(auth_session.username, logged_in=True, auth_method="steamcmd")
-        # Query licenses directly on the authenticated interactive prompt and cleanly quit.
-        # This saves Steam credentials to config.vdf so future runs work,
-        # and collects all owned game licenses without starting a second competing process.
+        # NOTE: Do not set auth_session.status = "logged_in" yet, and do not clear pending_password!
+        # Keeping status as "authenticating" prevents the frontend from firing /api/library
+        # prematurely while SteamCMD is still outputting licenses.
         try:
-            logger.info("Login successful. Fetching owned licenses via interactive PTY...")
-            os.write(master_fd, b"licenses_print\nquit\n")
+            # If SteamCMD did not output licenses yet, send command explicitly
+            if "License packageID" not in accum_str:
+                logger.info("Sending licenses_print to interactive PTY...")
+                try:
+                    os.write(master_fd, b"licenses_print\nquit\n")
+                except Exception:
+                    pass
+
             read_start = time.time()
-            while time.time() - read_start < 12.0:
+            while time.time() - read_start < 25.0:
+                if auth_session.process and auth_session.process.poll() is not None:
+                    # Drain any remaining bytes from PTY
+                    try:
+                        r, _, _ = select.select([master_fd], [], [], 0.3)
+                        if r:
+                            ch = os.read(master_fd, 4096).decode("utf-8", errors="replace")
+                            if ch:
+                                accum_str += ch
+                    except Exception:
+                        pass
+                    break
+
                 r, _, _ = select.select([master_fd], [], [], 0.5)
                 if not r:
-                    if auth_session.process and auth_session.process.poll() is not None:
-                        break
                     continue
                 ch = os.read(master_fd, 4096).decode("utf-8", errors="replace")
                 if not ch:
@@ -355,6 +370,7 @@ def _monitor_login_pty():
             logger.warning(f"Notice while reading licenses on login: {e}")
 
         owned_app_ids = parse_licenses_output(accum_str)
+        print(f"[VaporFetch] licenses_print stream completed. Output {len(accum_str)} bytes, parsed {len(owned_app_ids)} AppIDs.")
         if owned_app_ids:
             try:
                 from vaporfetch.library import populate_and_cache_games
@@ -362,14 +378,24 @@ def _monitor_login_pty():
                 logger.info(f"Cached {len(owned_app_ids)} owned games from login session.")
             except Exception as e:
                 logger.error(f"Error caching owned games: {e}")
+        else:
+            logger.warning("No owned AppIDs parsed from login output.")
 
         try:
             if auth_session.process and auth_session.process.poll() is None:
                 auth_session.process.terminate()
+                auth_session.process.wait(timeout=2)
+        except Exception:
+            pass
+
+        try:
             os.close(master_fd)
         except Exception:
             pass
         auth_session.master_fd = None
+
+        save_current_session(auth_session.username, logged_in=True, auth_method="steamcmd")
+        auth_session.status = "logged_in"
         return accum_str
 
     while auth_session.status in ("authenticating", "awaiting_2fa"):
@@ -482,12 +508,11 @@ def submit_2fa_code(code: str) -> Dict[str, Any]:
             auth_session.code_injected_at = len("".join(auth_session._output_buffer))
             os.write(auth_session.master_fd, f"{clean_code}\n".encode("utf-8"))
             start_time = time.time()
-            while time.time() - start_time < 12.0:
+            while time.time() - start_time < 25.0:
                 if auth_session.status in ("logged_in", "failed"):
                     break
                 time.sleep(0.2)
             if auth_session.status == "logged_in":
-                auth_session.pending_password = None
                 return {"status": "logged_in", "username": username}
             elif auth_session.status == "failed":
                 return {"status": "failed", "error": auth_session.error_message or "2FA verification failed."}
@@ -505,7 +530,7 @@ def submit_2fa_code(code: str) -> Dict[str, Any]:
     ]
     if password:
         cmd.append(password)
-    cmd.append("+quit")
+    cmd.extend(["+licenses_print", "+quit"])
 
     try:
         res = subprocess.run(
@@ -514,7 +539,7 @@ def submit_2fa_code(code: str) -> Dict[str, Any]:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            timeout=20,
+            timeout=30,
             check=False,
         )
         out = res.stdout or ""
@@ -522,9 +547,16 @@ def submit_2fa_code(code: str) -> Dict[str, Any]:
         result = check_login_output(out)
         if result:
             if result["status"] == "logged_in":
+                save_current_session(username, logged_in=True, auth_method="steamcmd")
+                owned_app_ids = parse_licenses_output(out)
+                if owned_app_ids:
+                    try:
+                        from vaporfetch.library import populate_and_cache_games
+                        populate_and_cache_games(owned_app_ids)
+                        logger.info(f"Cached {len(owned_app_ids)} owned games from fallback verification.")
+                    except Exception as e:
+                        logger.error(f"Error caching owned games: {e}")
                 auth_session.status = "logged_in"
-                auth_session.pending_password = None
-                save_current_session(username, logged_in=True)
                 return {"status": "logged_in", "username": username}
             elif result["status"] == "failed":
                 return result
@@ -548,6 +580,10 @@ def parse_licenses_output(output: str) -> Set[int]:
                 part = part.strip()
                 if part.isdigit():
                     app_ids.add(int(part))
+        else:
+            m2 = RE_APPID_EXPLICIT.search(line)
+            if m2:
+                app_ids.add(int(m2.group(1)))
     return app_ids
 
 
@@ -567,12 +603,14 @@ def fetch_licenses(username: str) -> Set[int]:
         auth_session.master_fd = None
 
     steamcmd_bin = find_steamcmd_path()
-    cmd = [
-        steamcmd_bin,
-        "+login", username,
-        "+licenses_print",
-        "+quit"
-    ]
+    pwd = auth_session.pending_password if auth_session.username == username else None
+    cmd = [steamcmd_bin]
+    if pwd:
+        cmd.extend(["+login", username, pwd])
+    else:
+        cmd.extend(["+login", username])
+    cmd.extend(["+licenses_print", "+quit"])
+
     try:
         res = subprocess.run(
             cmd,
@@ -582,8 +620,12 @@ def fetch_licenses(username: str) -> Set[int]:
             timeout=60,
             check=False,
         )
-        logger.info(f"fetch_licenses output: {res.stdout[-300:] if res.stdout else 'empty'}")
-        return parse_licenses_output(res.stdout)
+        out = res.stdout or ""
+        app_ids = parse_licenses_output(out)
+        print(f"[VaporFetch] licenses_print for {username} completed. Output {len(out)} bytes, parsed {len(app_ids)} AppIDs.")
+        if not app_ids and out:
+            print(f"[VaporFetch] Warning: 0 AppIDs parsed from licenses_print. Output snippet: {out[-500:]}")
+        return app_ids
     except Exception as e:
         logger.error(f"Error fetching licenses: {e}")
         return set()
@@ -624,11 +666,15 @@ def run_app_download(
     Streams live progress and log output via callbacks.
     """
     steamcmd_bin = find_steamcmd_path()
+    pwd = auth_session.pending_password if auth_session.username == username else None
     cmd = [
         steamcmd_bin,
         "+force_install_dir", install_dir,
-        "+login", username,
     ]
+    if pwd:
+        cmd.extend(["+login", username, pwd])
+    else:
+        cmd.extend(["+login", username])
 
     if platform and platform.lower() in ("windows", "linux", "macos"):
         cmd.extend(["+@sSteamCmdForcePlatformType", platform.lower()])

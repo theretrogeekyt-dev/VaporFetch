@@ -13,7 +13,7 @@ import urllib.error
 from pathlib import Path
 from typing import Dict, Any, List, Set, Optional, Callable
 
-from vaporfetch.config import find_steamcmd_path, DATA_DIR, SESSION_FILE
+from vaporfetch.config import find_steamcmd_path, DATA_DIR, SESSION_FILE, safe_write_json
 
 logger = logging.getLogger("vaporfetch.steamcmd")
 
@@ -176,8 +176,7 @@ def save_current_session(username: str, logged_in: bool = True, steam_id: str = 
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         **extra,
     })
-    with open(SESSION_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+    safe_write_json(SESSION_FILE, data)
 
 
 def write_steam_login_config(

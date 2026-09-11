@@ -26,6 +26,10 @@ mkdir -p "${STEAM_DIR}/logs"
 mkdir -p "${STEAM_DIR}/.steam/sdk32"
 mkdir -p "${STEAM_DIR}/.steam/sdk64"
 
+# Ensure /data and all existing files are fully readable/writable
+chmod -R a+rwX "${DATA_DIR}" 2>/dev/null || true
+chmod a+rwx "${DOWNLOADS_DIR}" 2>/dev/null || true
+
 # 3. Migrate legacy storage directories if present from earlier versions
 if [ -d "${DATA_DIR}/steam_home" ] && [ ! -d "${STEAM_DIR}/Steam/config/loginusers.vdf" ]; then
     echo "[VaporFetch] Migrating legacy steam_home data..."
@@ -78,9 +82,11 @@ if [ "${PUID}" -ne 0 ] && [ "${PGID}" -ne 0 ]; then
         useradd -u "${PUID}" -g "${PGID}" -d "${STEAM_DIR}" -M -s /bin/bash vaporfetch 2>/dev/null || true
     fi
 
-    # Ensure ownership of /data and /downloads
-    chown "${PUID}:${PGID}" "${DATA_DIR}" "${DOWNLOADS_DIR}" 2>/dev/null || true
-    chown -R "${PUID}:${PGID}" "${STEAM_DIR}" 2>/dev/null || true
+    # Ensure ownership of /data and /downloads (including all existing files like session.json)
+    chown -R "${PUID}:${PGID}" "${DATA_DIR}" 2>/dev/null || true
+    chown "${PUID}:${PGID}" "${DOWNLOADS_DIR}" 2>/dev/null || true
+    chmod -R a+rwX "${DATA_DIR}" 2>/dev/null || true
+    chmod a+rwx "${DOWNLOADS_DIR}" 2>/dev/null || true
 
     # Hand off execution cleanly via gosu with tini
     GOSU_BIN=$(command -v gosu || echo "/usr/sbin/gosu")
@@ -88,5 +94,7 @@ if [ "${PUID}" -ne 0 ] && [ "${PGID}" -ne 0 ]; then
 else
     # Running as root (default for Docker)
     echo "[VaporFetch] Running with container root privileges (umask=${UMASK_VAL})"
+    chmod -R a+rwX "${DATA_DIR}" 2>/dev/null || true
+    chmod a+rwx "${DOWNLOADS_DIR}" 2>/dev/null || true
     exec /usr/bin/tini -- "$@"
 fi

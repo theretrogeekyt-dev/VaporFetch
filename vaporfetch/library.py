@@ -14,6 +14,7 @@ from vaporfetch.config import (
     APP_CACHE_FILE,
     LIBRARY_CACHE_FILE,
     load_settings,
+    safe_write_json,
 )
 from vaporfetch.steamcmd import get_current_session, fetch_licenses
 
@@ -63,11 +64,7 @@ class AppResolver:
                 print(f"[VaporFetch] Warning: Failed to load app cache: {e}")
 
     def save_cache(self) -> None:
-        try:
-            with open(APP_CACHE_FILE, "w", encoding="utf-8") as f:
-                json.dump(self.app_map, f)
-        except Exception as e:
-            print(f"[VaporFetch] Warning: Failed to save app cache: {e}")
+        safe_write_json(APP_CACHE_FILE, self.app_map)
 
     def update_from_steam_api(self) -> bool:
         """Download Steam AppID master list if available."""
@@ -256,11 +253,7 @@ def populate_and_cache_games(app_ids: Set[int]) -> List[Dict[str, Any]]:
         })
 
     # Save to cache
-    try:
-        with open(LIBRARY_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(games, f, indent=2)
-    except Exception as e:
-        print(f"[VaporFetch] Error saving library cache: {e}")
+    safe_write_json(LIBRARY_CACHE_FILE, games)
 
     return games
 

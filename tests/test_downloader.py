@@ -107,6 +107,51 @@ class TestDownloader(unittest.TestCase):
                 self.assertEqual(s2["access_token"], "token123")
                 self.assertEqual(s2["auth_method"], "steamcmd")
 
+    def test_safe_write_json_normal(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from vaporfetch.config import safe_write_json
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "test.json"
+            safe_write_json(target, {"hello": "world"})
+            self.assertTrue(target.exists())
+            with open(target, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.assertEqual(data, {"hello": "world"})
+
+    def test_safe_write_json_permission_error_fallback(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from vaporfetch.config import safe_write_json
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "test_perm.json"
+            target.write_text("{}", encoding="utf-8")
+
+            original_open = open
+            attempt = 0
+
+            def mock_open_func(file, mode="r", *args, **kwargs):
+                nonlocal attempt
+                if Path(file) == target and "w" in mode:
+                    attempt += 1
+                    if attempt == 1:
+                        raise PermissionError("Simulated permission error")
+                return original_open(file, mode, *args, **kwargs)
+
+            with patch("builtins.open", side_effect=mock_open_func):
+                safe_write_json(target, {"recovered": True})
+
+            self.assertEqual(attempt, 2)
+            with open(target, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.assertEqual(data, {"recovered": True})
+
 if __name__ == "__main__":
     unittest.main()
+
 

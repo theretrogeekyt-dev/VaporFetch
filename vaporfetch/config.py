@@ -97,12 +97,29 @@ def load_settings() -> Dict[str, Any]:
             pass
     return dict(DEFAULT_SETTINGS)
 
+def safe_write_json(filepath: Path, data: Any) -> None:
+    """
+    Safely write a JSON file to disk.
+    If a PermissionError occurs (e.g. file was previously created by root in a docker volume),
+    unlinks the stale file from the writable directory and writes a new file under the active user.
+    """
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except PermissionError:
+        try:
+            if filepath.exists():
+                filepath.unlink()
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except Exception:
+            pass
+
 def save_settings(settings: Dict[str, Any]) -> None:
     """Save updated settings to disk."""
     current = load_settings()
     current.update(settings)
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(current, f, indent=2)
+    safe_write_json(SETTINGS_FILE, current)
 
 def find_steamcmd_path() -> str:
     """Locate the steamcmd binary in system path or standard install locations."""

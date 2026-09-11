@@ -117,8 +117,10 @@ if FastAPI is not None:
     @app.get("/api/login/status")
     async def login_status_endpoint():
         session = get_current_session()
+        is_logged_in = bool(session.get("logged_in"))
         return {
-            "status": "logged_in" if session.get("logged_in") else auth_session.status,
+            "status": "logged_in" if is_logged_in else auth_session.status,
+            "username": session.get("username") or auth_session.username,
             "prompt": auth_session.prompt_message,
             "error": auth_session.error_message,
             "two_factor_type": auth_session.two_factor_type,
@@ -126,11 +128,17 @@ if FastAPI is not None:
 
     @app.post("/api/login")
     async def login_endpoint(payload: LoginRequest):
-        return {"status": "qr_required", "message": "Please sign in using Steam Mobile QR Code."}
+        if not payload.username or not payload.username.strip():
+            raise HTTPException(status_code=400, detail="Username is required")
+        res = start_login(payload.username.strip(), payload.password, payload.code)
+        return res
 
     @app.post("/api/login/2fa")
     async def two_factor_endpoint(payload: TwoFactorRequest):
-        return {"status": "qr_required", "message": "Please sign in using Steam Mobile QR Code."}
+        if not payload.code or not payload.code.strip():
+            raise HTTPException(status_code=400, detail="Steam Guard code is required")
+        res = submit_2fa_code(payload.code.strip())
+        return res
 
     @app.post("/api/login/qr/begin")
     async def qr_begin_endpoint():

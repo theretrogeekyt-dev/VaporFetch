@@ -219,5 +219,39 @@ class TestLibrary(unittest.TestCase):
         sid = extract_steam_id_from_token(fake_jwt)
         self.assertEqual(sid, "76561199132013751")
 
+    def test_server_login_endpoints(self):
+        try:
+            from fastapi.testclient import TestClient
+            from vaporfetch.web.server import app
+        except ImportError:
+            self.skipTest("fastapi not installed in host environment")
+            return
+
+        client = TestClient(app)
+
+        # Test login status
+        with patch("vaporfetch.web.server.get_current_session", return_value={"logged_in": True, "username": "reaper360vr"}):
+            resp = client.get("/api/login/status")
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertEqual(data["status"], "logged_in")
+            self.assertEqual(data["username"], "reaper360vr")
+
+        # Test start login endpoint
+        with patch("vaporfetch.web.server.start_login", return_value={"status": "awaiting_2fa", "two_factor_type": "mobile_push", "prompt": "Confirm on phone"}):
+            resp = client.post("/api/login", json={"username": "reaper360vr", "password": "dummy"})
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertEqual(data["status"], "awaiting_2fa")
+            self.assertEqual(data["two_factor_type"], "mobile_push")
+
+        # Test submit 2fa endpoint
+        with patch("vaporfetch.web.server.submit_2fa_code", return_value={"status": "logged_in", "username": "reaper360vr"}):
+            resp = client.post("/api/login/2fa", json={"code": "K97XP"})
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertEqual(data["status"], "logged_in")
+
 if __name__ == "__main__":
     unittest.main()
+

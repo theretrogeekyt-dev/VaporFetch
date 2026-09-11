@@ -76,9 +76,29 @@ document.addEventListener("DOMContentLoaded", () => {
     settingApiKey: document.getElementById("settingApiKey"),
     settingCustomSteamId: document.getElementById("settingCustomSteamId"),
 
-    // Modal
+    // Modal & Auth
     authModal: document.getElementById("authModal"),
     modalCloseBtn: document.getElementById("modalCloseBtn"),
+    modalTabsBar: document.getElementById("modalTabsBar"),
+    tabBtnDirect: document.getElementById("tabBtnDirect"),
+    tabBtnQR: document.getElementById("tabBtnQR"),
+    authPanelDirect: document.getElementById("authPanelDirect"),
+    authStepCredentials: document.getElementById("authStepCredentials"),
+    loginUsername: document.getElementById("loginUsername"),
+    loginPassword: document.getElementById("loginPassword"),
+    loginError: document.getElementById("loginError"),
+    loginSubmitBtn: document.getElementById("loginSubmitBtn"),
+    authStepPush: document.getElementById("authStepPush"),
+    pushStatusText: document.getElementById("pushStatusText"),
+    cancelPushBtn: document.getElementById("cancelPushBtn"),
+    authStepCode: document.getElementById("authStepCode"),
+    codePromptText: document.getElementById("codePromptText"),
+    twoFactorCodeInput: document.getElementById("twoFactorCodeInput"),
+    codeError: document.getElementById("codeError"),
+    twoFactorSubmitBtn: document.getElementById("twoFactorSubmitBtn"),
+    cancelCodeBtn: document.getElementById("cancelCodeBtn"),
+    authStepLoading: document.getElementById("authStepLoading"),
+    loginLoadingText: document.getElementById("loginLoadingText"),
     authPanelQR: document.getElementById("authPanelQR"),
     qrLoading: document.getElementById("qrLoading"),
     qrImage: document.getElementById("qrImage"),
@@ -228,6 +248,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // --- Authentication Modal ---
+  let qrPollTimer = null;
+  let pushPollTimer = null;
+  let activeAuthTab = "direct"; // "direct" or "qr"
+
   function initAuth() {
     elements.authBtn.addEventListener("click", () => {
       openAuthModal();
@@ -243,23 +267,79 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     elements.modalCloseBtn?.addEventListener("click", closeAuthModal);
-    elements.qrCancelBtn?.addEventListener("click", closeAuthModal);
-    elements.qrRefreshBtn?.addEventListener("click", startQRLogin);
-
     elements.loginDoneBtn?.addEventListener("click", () => {
       closeAuthModal();
       fetchLibrary();
     });
-
     elements.logoutBtn?.addEventListener("click", handleLogout);
+
+    // Tab buttons
+    elements.tabBtnDirect?.addEventListener("click", () => switchAuthTab("direct"));
+    elements.tabBtnQR?.addEventListener("click", () => switchAuthTab("qr"));
+
+    // Direct Login Form
+    elements.loginSubmitBtn?.addEventListener("click", handleDirectLogin);
+    elements.loginPassword?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") handleDirectLogin();
+    });
+
+    // 2FA Code Form
+    elements.twoFactorSubmitBtn?.addEventListener("click", handleTwoFactorSubmit);
+    elements.twoFactorCodeInput?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") handleTwoFactorSubmit();
+    });
+
+    // Cancel buttons
+    elements.cancelPushBtn?.addEventListener("click", () => {
+      stopPushPolling();
+      showDirectStep("credentials");
+    });
+    elements.cancelCodeBtn?.addEventListener("click", () => {
+      showDirectStep("credentials");
+    });
+
+    // QR Buttons
+    elements.qrCancelBtn?.addEventListener("click", closeAuthModal);
+    elements.qrRefreshBtn?.addEventListener("click", startQRLogin);
+  }
+
+  function switchAuthTab(tab) {
+    activeAuthTab = tab;
+    if (tab === "direct") {
+      elements.tabBtnDirect?.classList.add("active");
+      elements.tabBtnQR?.classList.remove("active");
+      if (elements.authPanelDirect) elements.authPanelDirect.style.display = "block";
+      if (elements.authPanelQR) elements.authPanelQR.style.display = "none";
+      stopQRPolling();
+      showDirectStep("credentials");
+    } else {
+      elements.tabBtnDirect?.classList.remove("active");
+      elements.tabBtnQR?.classList.add("active");
+      if (elements.authPanelDirect) elements.authPanelDirect.style.display = "none";
+      if (elements.authPanelQR) elements.authPanelQR.style.display = "block";
+      stopPushPolling();
+      startQRLogin();
+    }
+  }
+
+  function showDirectStep(step) {
+    // "credentials", "loading", "push", "code"
+    if (elements.authStepCredentials) elements.authStepCredentials.style.display = step === "credentials" ? "block" : "none";
+    if (elements.authStepLoading) elements.authStepLoading.style.display = step === "loading" ? "block" : "none";
+    if (elements.authStepPush) elements.authStepPush.style.display = step === "push" ? "block" : "none";
+    if (elements.authStepCode) elements.authStepCode.style.display = step === "code" ? "block" : "none";
+    if (elements.loginError) elements.loginError.style.display = "none";
+    if (elements.codeError) elements.codeError.style.display = "none";
   }
 
   function openAuthModal() {
     elements.authModal.style.display = "flex";
-    if (elements.qrError) elements.qrError.style.display = "none";
     stopQRPolling();
+    stopPushPolling();
 
     if (state.user && state.user.logged_in) {
+      if (elements.modalTabsBar) elements.modalTabsBar.style.display = "none";
+      if (elements.authPanelDirect) elements.authPanelDirect.style.display = "none";
       if (elements.authPanelQR) elements.authPanelQR.style.display = "none";
       if (elements.loginStepSuccess) elements.loginStepSuccess.style.display = "block";
 
@@ -270,22 +350,179 @@ document.addEventListener("DOMContentLoaded", () => {
       if (elements.authStatusAlert) elements.authStatusAlert.className = "alert alert-success";
       if (elements.authStatusText) elements.authStatusText.textContent = `✅ Signed in as ${state.user.username}`;
     } else {
+      if (elements.modalTabsBar) elements.modalTabsBar.style.display = "flex";
       if (elements.loginStepSuccess) elements.loginStepSuccess.style.display = "none";
-      if (elements.authPanelQR) elements.authPanelQR.style.display = "block";
-      startQRLogin();
+      switchAuthTab("direct");
+      setTimeout(() => elements.loginUsername?.focus(), 50);
     }
   }
 
   function closeAuthModal() {
     stopQRPolling();
+    stopPushPolling();
+    if (elements.loginPassword) elements.loginPassword.value = "";
+    if (elements.twoFactorCodeInput) elements.twoFactorCodeInput.value = "";
     elements.authModal.style.display = "none";
   }
 
-  // --- Steam Mobile QR Code Login ---
-  let qrPollTimer = null;
+  async function handleDirectLogin() {
+    const username = (elements.loginUsername?.value || "").trim();
+    const password = elements.loginPassword?.value || "";
 
+    if (!username) {
+      showLoginError("Please enter your Steam username.");
+      elements.loginUsername?.focus();
+      return;
+    }
+    if (!password) {
+      showLoginError("Please enter your Steam password.");
+      elements.loginPassword?.focus();
+      return;
+    }
+
+    showDirectStep("loading");
+    if (elements.loginLoadingText) elements.loginLoadingText.textContent = `Logging in user '${username}'...`;
+
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || data.status === "failed") {
+        showDirectStep("credentials");
+        showLoginError(data.detail || data.error || "Steam login failed. Please check your username and password.");
+        return;
+      }
+
+      if (data.status === "logged_in") {
+        onAuthSuccess();
+      } else if (data.status === "awaiting_2fa") {
+        if (data.two_factor_type === "mobile_push") {
+          showDirectStep("push");
+          startPushPolling();
+        } else {
+          showDirectStep("code");
+          if (elements.codePromptText) elements.codePromptText.textContent = data.prompt || "Enter the Steam Guard code sent to your email or mobile app:";
+          elements.twoFactorCodeInput?.focus();
+        }
+      } else if (data.status === "authenticating") {
+        showDirectStep("push");
+        startPushPolling();
+      } else {
+        showDirectStep("credentials");
+        showLoginError(data.error || "Unexpected login state.");
+      }
+    } catch (e) {
+      showDirectStep("credentials");
+      showLoginError(`Network error: ${e.message}`);
+    }
+  }
+
+  function startPushPolling() {
+    stopPushPolling();
+    pushPollTimer = setInterval(async () => {
+      try {
+        const res = await fetch("/api/login/status");
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (data.status === "logged_in") {
+          stopPushPolling();
+          onAuthSuccess();
+        } else if (data.status === "failed") {
+          stopPushPolling();
+          showDirectStep("credentials");
+          showLoginError(data.error || "Steam confirmation failed or timed out.");
+        } else if (data.status === "awaiting_2fa" && data.two_factor_type !== "mobile_push") {
+          stopPushPolling();
+          showDirectStep("code");
+          if (elements.codePromptText) elements.codePromptText.textContent = data.prompt || "Enter the Steam Guard code sent to your email:";
+          elements.twoFactorCodeInput?.focus();
+        }
+      } catch (e) {
+        // Ignore transient poll errors
+      }
+    }, 2000);
+  }
+
+  function stopPushPolling() {
+    if (pushPollTimer) {
+      clearInterval(pushPollTimer);
+      pushPollTimer = null;
+    }
+  }
+
+  async function handleTwoFactorSubmit() {
+    const code = (elements.twoFactorCodeInput?.value || "").trim();
+    if (!code) {
+      showCodeError("Please enter your Steam Guard code.");
+      return;
+    }
+
+    if (elements.twoFactorSubmitBtn) {
+      elements.twoFactorSubmitBtn.disabled = true;
+      elements.twoFactorSubmitBtn.textContent = "Verifying...";
+    }
+
+    try {
+      const res = await fetch("/api/login/2fa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || data.status === "failed") {
+        showCodeError(data.detail || data.error || "Invalid code. Please try again.");
+        return;
+      }
+
+      if (data.status === "logged_in") {
+        onAuthSuccess();
+      } else {
+        showCodeError(data.error || "Verification incomplete. Please try again.");
+      }
+    } catch (e) {
+      showCodeError(`Network error: ${e.message}`);
+    } finally {
+      if (elements.twoFactorSubmitBtn) {
+        elements.twoFactorSubmitBtn.disabled = false;
+        elements.twoFactorSubmitBtn.textContent = "Verify Code";
+      }
+    }
+  }
+
+  async function onAuthSuccess() {
+    stopPushPolling();
+    stopQRPolling();
+    if (elements.modalTabsBar) elements.modalTabsBar.style.display = "none";
+    if (elements.authPanelDirect) elements.authPanelDirect.style.display = "none";
+    if (elements.authPanelQR) elements.authPanelQR.style.display = "none";
+    if (elements.loginStepSuccess) elements.loginStepSuccess.style.display = "block";
+
+    await fetchInitialStatus();
+    fetchLibrary(true);
+  }
+
+  function showLoginError(msg) {
+    if (!elements.loginError) return;
+    elements.loginError.textContent = msg;
+    elements.loginError.style.display = "block";
+  }
+
+  function showCodeError(msg) {
+    if (!elements.codeError) return;
+    elements.codeError.textContent = msg;
+    elements.codeError.style.display = "block";
+  }
+
+  // --- Steam Mobile QR Code Login ---
   async function startQRLogin() {
     stopQRPolling();
+    stopPushPolling();
     if (!elements.qrLoading || !elements.qrImage) return;
 
     elements.qrLoading.style.display = "block";
@@ -340,10 +577,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } else if (data.status === "logged_in") {
         stopQRPolling();
         elements.qrStatusText.textContent = "✅ Signed in successfully!";
-        if (elements.authPanelQR) elements.authPanelQR.style.display = "none";
-        if (elements.loginStepSuccess) elements.loginStepSuccess.style.display = "block";
-        await fetchInitialStatus();
-        fetchLibrary(true);
+        onAuthSuccess();
       } else if (data.status === "expired") {
         stopQRPolling();
         showQRError("QR code expired. Click Refresh to generate a new code.");
@@ -373,6 +607,7 @@ document.addEventListener("DOMContentLoaded", () => {
   async function handleLogout() {
     try {
       stopQRPolling();
+      stopPushPolling();
       await fetch("/api/logout", { method: "POST" });
       updateUserSession(null);
       state.games = [];

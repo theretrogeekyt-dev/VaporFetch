@@ -919,3 +919,73 @@ body {
   }
 }
 
+/* Modal Tab Bar & Phone Pulse Animation */
+.modal-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 18px;
+}
+
+.modal-tab-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 10px 14px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.modal-tab-btn:hover {
+  color: var(--text-main);
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+.modal-tab-btn.active {
+  color: var(--accent-cyan);
+  border-bottom-color: var(--accent-cyan);
+  background-color: rgba(6, 182, 212, 0.06);
+}
+
+.phone-pulse-container {
+  text-align: center;
+  padding: 24px 16px;
+  background: #0b111e;
+  border: 1px solid var(--border-color);
+  border-radius: var(--card-radius);
+  margin: 10px 0;
+}
+
+.phone-pulse-icon {
+  font-size: 3.5rem;
+  display: inline-block;
+  animation: phonePulse 1.8s infinite ease-in-out;
+}
+
+@keyframes phonePulse {
+  0% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 rgba(6, 182, 212, 0));
+  }
+  50% {
+    transform: scale(1.15);
+    filter: drop-shadow(0 0 16px rgba(6, 182, 212, 0.7));
+  }
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 rgba(6, 182, 212, 0));
+  }
+}
+
+.btn-block {
+  width: 100%;
+}
+
+

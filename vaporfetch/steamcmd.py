@@ -28,6 +28,10 @@ RE_APPID_EXPLICIT = re.compile(r"\b(?:AppID|App)\s*[:\s]\s*(\d+)\b", re.IGNORECA
 RE_LICENSES_PKG = re.compile(r"License packageID\s+([0-9]+):", re.IGNORECASE)
 
 # 2FA prompts and result codes in SteamCMD
+RE_MOBILE_PUSH = re.compile(
+    r"(confirm the login in the Steam Mobile app|Waiting for confirmation\.\.\.(?!OK))",
+    re.IGNORECASE
+)
 RE_STEAM_GUARD = re.compile(
     r"(Steam Guard code:|Steam Guard Mobile Authenticator|Two-factor code:|Account Logon Denied|Need Two Factor|result code 65|result code 85)",
     re.IGNORECASE
@@ -41,7 +45,7 @@ RE_LOGIN_FAIL = re.compile(
 def check_login_output(text: str) -> Optional[Dict[str, Any]]:
     """
     Parse SteamCMD login output text to determine current state based on
-    the latest event in the output stream: logged_in, awaiting_2fa, or failed.
+    the latest event in the output stream: logged_in, awaiting_2fa (mobile_push or code), or failed.
     """
     events = []
 
@@ -49,12 +53,20 @@ def check_login_output(text: str) -> Optional[Dict[str, Any]]:
     for m in RE_LOGIN_SUCCESS.finditer(text):
         events.append((m.end(), "logged_in", {"status": "logged_in"}))
 
-    # 2. 2FA check
-    for m in RE_STEAM_GUARD.finditer(text):
-        is_mobile = bool(re.search(r"(Mobile Authenticator|Need Two Factor|result code 85)", text, re.IGNORECASE))
+    # 2. Mobile Push Confirmation check (Steam Mobile App prompt)
+    for m in RE_MOBILE_PUSH.finditer(text):
         events.append((m.end(), "awaiting_2fa", {
             "status": "awaiting_2fa",
-            "prompt": "Enter the current code from your Steam Mobile Authenticator" if is_mobile else "Enter Steam Guard code sent to your email",
+            "prompt": "Please confirm the login in the Steam Mobile app on your phone.",
+            "two_factor_type": "mobile_push",
+        }))
+
+    # 3. 2FA Code check (Email or manual authenticator code)
+    for m in RE_STEAM_GUARD.finditer(text):
+        is_mobile = bool(re.search(r"(Mobile Authenticator|Need Two Factor|result code 85)", m.group(0), re.IGNORECASE))
+        events.append((m.end(), "awaiting_2fa", {
+            "status": "awaiting_2fa",
+            "prompt": "Enter the 5-character code from your Steam Mobile Authenticator" if is_mobile else "Enter Steam Guard code sent to your email",
             "two_factor_type": "mobile" if is_mobile else "email",
         }))
 
@@ -276,7 +288,7 @@ def has_steamcmd_cached_credentials(username: str = "") -> bool:
     """Check if SteamCMD has existing cached login tokens on disk or active session for username."""
     session = get_current_session()
     uname = username.strip().lower() if username else ""
-    if session.get("logged_in") and session.get("username"):
+    if session.get("logged_in") and session.get("username") and session.get("auth_method") == "steamcmd":
         if not uname or uname == session.get("username", "").lower():
             return True
 
@@ -625,10 +637,19 @@ def _monitor_login_pty():
                 pass
 
         save_current_session(auth_session.username, logged_in=True, steam_id=steam_id, auth_method="steamcmd")
+        try:
+            subprocess.run(["chmod", "-R", "a+rwX", str(DATA_DIR / "steam")], check=False)
+        except Exception:
+            pass
         auth_session.status = "logged_in"
         return accum_str
 
+    start_loop = time.time()
     while auth_session.status in ("authenticating", "awaiting_2fa"):
+        if time.time() - start_loop > 180.0:
+            auth_session.status = "failed"
+            auth_session.error_message = "Authentication timed out. Please try signing in again."
+            break
         try:
             r, _, _ = select.select([master_fd], [], [], 0.3)
             if not r:

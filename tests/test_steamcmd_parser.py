@@ -2,9 +2,10 @@ import unittest
 from vaporfetch.steamcmd import (
     parse_progress_line,
     parse_licenses_output,
+    check_login_output,
     RE_STEAM_GUARD,
     RE_LOGIN_SUCCESS,
-    RE_LOGIN_FAIL_CODE,
+    RE_LOGIN_FAIL,
     RE_APP_SUCCESS,
     RE_APP_ERROR,
 )
@@ -65,26 +66,46 @@ class TestSteamCMDParser(unittest.TestCase):
         self.assertTrue(bool(RE_STEAM_GUARD.search(mobile_prompt)))
 
     def test_login_result_detection(self):
-        success_line1 = "Logged in OK"
-        success_line2 = "Waiting for user info...OK"
-        fail_line = "FAILED with result code 5"
-        code65 = "FAILED with result code 65"
-        code85 = "FAILED with result code 85"
+        from vaporfetch.steamcmd import check_login_output
 
-        self.assertTrue(bool(RE_LOGIN_SUCCESS.search(success_line1)))
-        self.assertTrue(bool(RE_LOGIN_SUCCESS.search(success_line2)))
-        
-        m_code = RE_LOGIN_FAIL_CODE.search(fail_line)
-        self.assertIsNotNone(m_code)
-        self.assertEqual(int(m_code.group(1)), 5)
+        # Account Logon Denied (Email 2FA)
+        r1 = check_login_output("Logging in user 'reaper360vr' to Steam Public...FAILED (Account Logon Denied)")
+        self.assertIsNotNone(r1)
+        self.assertEqual(r1["status"], "awaiting_2fa")
+        self.assertEqual(r1["two_factor_type"], "email")
 
-        m_65 = RE_LOGIN_FAIL_CODE.search(code65)
-        self.assertIsNotNone(m_65)
-        self.assertEqual(int(m_65.group(1)), 65)
+        # Need Two Factor (Mobile Authenticator 2FA)
+        r2 = check_login_output("Logging in user 'reaper360vr' to Steam Public...FAILED (Account Logon Denied Need Two Factor)")
+        self.assertIsNotNone(r2)
+        self.assertEqual(r2["status"], "awaiting_2fa")
+        self.assertEqual(r2["two_factor_type"], "mobile")
 
-        m_85 = RE_LOGIN_FAIL_CODE.search(code85)
-        self.assertIsNotNone(m_85)
-        self.assertEqual(int(m_85.group(1)), 85)
+        # Result code 65
+        r3 = check_login_output("FAILED with result code 65")
+        self.assertIsNotNone(r3)
+        self.assertEqual(r3["status"], "awaiting_2fa")
+
+        # Result code 85
+        r4 = check_login_output("FAILED with result code 85")
+        self.assertIsNotNone(r4)
+        self.assertEqual(r4["status"], "awaiting_2fa")
+        self.assertEqual(r4["two_factor_type"], "mobile")
+
+        # Invalid Password
+        r5 = check_login_output("FAILED (Invalid Password)")
+        self.assertIsNotNone(r5)
+        self.assertEqual(r5["status"], "failed")
+        self.assertIn("password", r5["error"].lower())
+
+        # No Connection
+        r6 = check_login_output("FAILED (No Connection)")
+        self.assertIsNotNone(r6)
+        self.assertEqual(r6["status"], "failed")
+
+        # Success
+        r7 = check_login_output("Logging in user 'reaper360vr' to Steam Public...Logged in OK")
+        self.assertIsNotNone(r7)
+        self.assertEqual(r7["status"], "logged_in")
 
     def test_app_success_and_error(self):
         succ = "Success! App '730' fully installed."

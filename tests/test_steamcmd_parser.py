@@ -107,6 +107,16 @@ class TestSteamCMDParser(unittest.TestCase):
         self.assertIsNotNone(r7)
         self.assertEqual(r7["status"], "logged_in")
 
+        # 2FA prompt followed by success (latest event wins)
+        r8 = check_login_output("Enter the current code from your Steam Guard Mobile Authenticator app: \nLogged in OK")
+        self.assertIsNotNone(r8)
+        self.assertEqual(r8["status"], "logged_in")
+
+        # 2FA prompt followed by mismatch failure (latest event wins)
+        r9 = check_login_output("Enter the current code from your Steam Guard Mobile Authenticator app: \nFAILED (Two-factor code mismatch)")
+        self.assertIsNotNone(r9)
+        self.assertEqual(r9["status"], "failed")
+
     def test_app_success_and_error(self):
         succ = "Success! App '730' fully installed."
         err = "ERROR! Failed to install app '730' (No subscription)"
@@ -122,26 +132,30 @@ class TestSteamCMDParser(unittest.TestCase):
 
     def test_start_login_with_upfront_code(self):
         from unittest.mock import patch, MagicMock
-        from vaporfetch.steamcmd import start_login
+        from vaporfetch.steamcmd import start_login, auth_session
+
+        def fake_sleep(s):
+            auth_session.status = "logged_in"
 
         with patch("vaporfetch.steamcmd.find_steamcmd_path", return_value="/usr/local/bin/steamcmd"), \
-             patch("subprocess.run") as mock_run, \
-             patch("vaporfetch.steamcmd.save_current_session") as mock_save:
+             patch("pty.openpty", return_value=(999, 998)), \
+             patch("os.close"), \
+             patch("subprocess.Popen") as mock_popen, \
+             patch("threading.Thread") as mock_thread, \
+             patch("time.sleep", side_effect=fake_sleep):
 
-            mock_res = MagicMock()
-            mock_res.stdout = "Logging in user 'testuser' to Steam Public...Logged in OK\nWaiting for user info...OK"
-            mock_run.return_value = mock_res
+            mock_proc = MagicMock()
+            mock_popen.return_value = mock_proc
 
             res = start_login("testuser", "secretpass", "R4NDM")
+            self.assertEqual(auth_session.username, "testuser")
             self.assertEqual(res["status"], "logged_in")
-            self.assertEqual(res["username"], "testuser")
 
-            # Check that +set_steam_guard_code was passed directly in cmd args
-            called_cmd = mock_run.call_args[0][0]
-            self.assertIn("+set_steam_guard_code", called_cmd)
-            self.assertIn("R4NDM", called_cmd)
+            called_cmd = mock_popen.call_args[0][0]
             self.assertIn("+login", called_cmd)
             self.assertIn("testuser", called_cmd)
+            self.assertIn("secretpass", called_cmd)
+            mock_thread.return_value.start.assert_called_once()
 
 if __name__ == "__main__":
     unittest.main()

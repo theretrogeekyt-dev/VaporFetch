@@ -308,12 +308,9 @@ def write_steam_login_config(
 
 
 def has_steamcmd_cached_credentials(username: str = "") -> bool:
-    """Check if SteamCMD has existing cached login tokens on disk or active session for username."""
-    session = get_current_session()
+    """Check if SteamCMD has existing cached login tokens on disk for username."""
     uname = username.strip().lower() if username else ""
-    if session.get("logged_in") and session.get("username") and session.get("auth_method") == "steamcmd":
-        if not uname or uname == session.get("username", "").lower():
-            return True
+
 
     search_dirs = [
         DATA_DIR / "steam" / "Steam",
@@ -971,6 +968,9 @@ def _run_steamcmd_capture(cmd: List[str], pwd: Optional[str] = None, timeout: fl
         )
         return res.stdout or ""
 
+    master_fd = None
+    slave_fd = None
+    proc = None
     try:
         master_fd, slave_fd = pty.openpty()
         proc = subprocess.Popen(
@@ -980,7 +980,6 @@ def _run_steamcmd_capture(cmd: List[str], pwd: Optional[str] = None, timeout: fl
             stderr=slave_fd,
             close_fds=True,
         )
-        os.close(slave_fd)
 
         out = ""
         read_start = time.time()
@@ -988,8 +987,15 @@ def _run_steamcmd_capture(cmd: List[str], pwd: Optional[str] = None, timeout: fl
 
         while time.time() - read_start < timeout:
             if proc.poll() is not None:
+                # Child process terminated. Close slave_fd so master_fd can reach EOF cleanly
+                if slave_fd is not None:
+                    try:
+                        os.close(slave_fd)
+                    except Exception:
+                        pass
+                    slave_fd = None
                 try:
-                    r, _, _ = select.select([master_fd], [], [], 0.3)
+                    r, _, _ = select.select([master_fd], [], [], 0.4)
                     if r:
                         ch = os.read(master_fd, 4096).decode("utf-8", errors="replace")
                         if ch:
@@ -1007,8 +1013,15 @@ def _run_steamcmd_capture(cmd: List[str], pwd: Optional[str] = None, timeout: fl
             try:
                 ch = os.read(master_fd, 4096).decode("utf-8", errors="replace")
             except OSError:
+                # On Linux, transient fork/restart can yield EIO if no child writes momentarily
+                if proc.poll() is None:
+                    time.sleep(0.1)
+                    continue
                 break
             if not ch:
+                if proc.poll() is None:
+                    time.sleep(0.1)
+                    continue
                 break
             out += ch
             for line in ch.splitlines():
@@ -1023,17 +1036,6 @@ def _run_steamcmd_capture(cmd: List[str], pwd: Optional[str] = None, timeout: fl
                 except Exception:
                     pass
 
-        try:
-            if proc.poll() is None:
-                proc.terminate()
-                proc.wait(timeout=2)
-        except Exception:
-            pass
-        try:
-            os.close(master_fd)
-        except Exception:
-            pass
-
         return out
     except Exception as e:
         logger.debug(f"PTY execution fallback to subprocess.run: {e}")
@@ -1046,6 +1048,23 @@ def _run_steamcmd_capture(cmd: List[str], pwd: Optional[str] = None, timeout: fl
             check=False,
         )
         return res.stdout or ""
+    finally:
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=2)
+            except Exception:
+                pass
+        if slave_fd is not None:
+            try:
+                os.close(slave_fd)
+            except Exception:
+                pass
+        if master_fd is not None:
+            try:
+                os.close(master_fd)
+            except Exception:
+                pass
 
 
 def fetch_licenses(username: str) -> Set[int]:

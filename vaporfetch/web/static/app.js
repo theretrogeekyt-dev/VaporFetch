@@ -109,6 +109,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loginStepSuccess: document.getElementById("loginStepSuccess"),
     loginDoneBtn: document.getElementById("loginDoneBtn"),
     logoutBtn: document.getElementById("logoutBtn"),
+    reauthBtn: document.getElementById("reauthBtn"),
     authStatusAlert: document.getElementById("authStatusAlert"),
     authStatusText: document.getElementById("authStatusText"),
     authUsernameDisplay: document.getElementById("authUsernameDisplay"),
@@ -258,6 +259,9 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     elements.emptyLoginBtn?.addEventListener("click", () => {
+      if (state.user && state.user.logged_in) {
+        state.user = null;
+      }
       openAuthModal();
     });
 
@@ -272,6 +276,11 @@ document.addEventListener("DOMContentLoaded", () => {
       fetchLibrary();
     });
     elements.logoutBtn?.addEventListener("click", handleLogout);
+    elements.reauthBtn?.addEventListener("click", () => {
+      handleLogout().then(() => {
+        openAuthModal();
+      });
+    });
 
     // Tab buttons
     elements.tabBtnDirect?.addEventListener("click", () => switchAuthTab("direct"));
@@ -736,7 +745,20 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
       if (elements.qrEmptyActions) elements.qrEmptyActions.style.display = "flex";
-      if (elements.emptyLoginBtn) elements.emptyLoginBtn.style.display = "none";
+      const isAuthError = lastSyncError && (
+        lastSyncError.toLowerCase().includes("credentials") ||
+        lastSyncError.toLowerCase().includes("re-authenticate") ||
+        lastSyncError.toLowerCase().includes("sign in") ||
+        lastSyncError.toLowerCase().includes("not logged")
+      );
+      if (elements.emptyLoginBtn) {
+        if (isAuthError) {
+          elements.emptyLoginBtn.textContent = "Sign In to Steam";
+          elements.emptyLoginBtn.style.display = "inline-block";
+        } else {
+          elements.emptyLoginBtn.style.display = "none";
+        }
+      }
     } else {
       if (elements.emptyTitle) elements.emptyTitle.textContent = "No Games Found";
       if (elements.emptySubtitle) {

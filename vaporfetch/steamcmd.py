@@ -163,14 +163,17 @@ def get_current_session() -> Dict[str, Any]:
 
 
 def save_current_session(username: str, logged_in: bool = True, steam_id: str = "", **extra) -> None:
-    """Save session information to disk."""
-    data = {
+    """Save session information to disk, preserving existing metadata if not explicitly overwritten."""
+    existing = get_current_session()
+    resolved_steam_id = steam_id or existing.get("steam_id", "")
+    data = dict(existing)
+    data.update({
         "username": username,
         "logged_in": logged_in,
-        "steam_id": steam_id,
+        "steam_id": resolved_steam_id,
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         **extra,
-    }
+    })
     with open(SESSION_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
@@ -493,7 +496,17 @@ def _monitor_login_pty():
             pass
         auth_session.master_fd = None
 
-        save_current_session(auth_session.username, logged_in=True, auth_method="steamcmd")
+        # Extract SteamID64 if Steam3 format [U:1:<acc_id>] is logged
+        steam_id = ""
+        m_u = re.search(r"\[U:1:([1-9][0-9]*)\]", accum_str)
+        if m_u:
+            try:
+                acc_id = int(m_u.group(1))
+                steam_id = str(76561197960265728 + acc_id)
+            except Exception:
+                pass
+
+        save_current_session(auth_session.username, logged_in=True, steam_id=steam_id, auth_method="steamcmd")
         auth_session.status = "logged_in"
         return accum_str
 
@@ -810,9 +823,23 @@ def run_app_download(
     """
     steamcmd_bin = find_steamcmd_path()
     pwd = auth_session.pending_password if auth_session.username == username else None
+
+    # Verify credentials exist before launching SteamCMD
+    if not pwd and not has_steamcmd_cached_credentials(username):
+        err = (
+            f"SteamCMD credentials not found for '{username}'. "
+            "Valve requires an authenticated SteamCMD session (Password & Steam Guard) to download game files. "
+            "Please click 'Account' and sign in once with Password & Steam Guard."
+        )
+        if log_cb:
+            log_cb(err)
+        return {"success": False, "error": err}
+
+    # Ensure install_dir does not contain '+' which breaks SteamCMD CLI parameter parsing
+    safe_install_dir = re.sub(r'\+', '_', install_dir)
     cmd = [
         steamcmd_bin,
-        "+force_install_dir", install_dir,
+        "+force_install_dir", safe_install_dir,
     ]
     if pwd:
         cmd.extend(["+login", username, pwd])
@@ -877,6 +904,8 @@ def run_app_download(
         err_match = RE_APP_ERROR.search(line_str)
         if err_match:
             error_message = err_match.group(2)
+        elif "ERROR (" in line_str or "FAILED (" in line_str:
+            error_message = line_str
 
         # Check progress
         parsed_prog = parse_progress_line(line_str)

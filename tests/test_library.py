@@ -13,6 +13,7 @@ class TestLibrary(unittest.TestCase):
     def test_sanitize_folder_name(self):
         self.assertEqual(sanitize_folder_name("Half-Life 2: Episode One"), "Half-Life 2_ Episode One")
         self.assertEqual(sanitize_folder_name("Cyberpunk 2077 // DLC *Special*"), "Cyberpunk 2077 __ DLC _Special_")
+        self.assertEqual(sanitize_folder_name("DOOM + DOOM II"), "DOOM _ DOOM II")
         self.assertEqual(sanitize_folder_name("   Spaces   "), "Spaces")
         self.assertEqual(sanitize_folder_name(""), "Unknown_Game")
 

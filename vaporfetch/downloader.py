@@ -16,6 +16,8 @@ from vaporfetch.library import (
 from vaporfetch.steamcmd import (
     get_current_session,
     run_app_download,
+    auth_session,
+    has_steamcmd_cached_credentials,
 )
 
 class DownloadTask:
@@ -208,6 +210,22 @@ class DownloadManager:
                 task.status = "failed"
                 task.error = "Steam account not logged in."
                 self.add_log(f"Cannot download '{task.name}': Not logged in.")
+                with self.lock:
+                    self.history.append(task)
+                    self.current_task = None
+                self.broadcast("queue_update", self.get_queue_state())
+                continue
+
+            has_pwd = bool(auth_session.pending_password and auth_session.username == username)
+            has_cached = has_steamcmd_cached_credentials(username)
+            if not has_pwd and not has_cached:
+                task.status = "failed"
+                task.error = "SteamCMD login required. Please sign in with Password & 2FA via Account."
+                self.add_log(
+                    f"Cannot download '{task.name}': SteamCMD credentials not found for '{username}'. "
+                    "QR code login only enables Web API library browsing. To download game files, Valve requires "
+                    "an authenticated SteamCMD session. Please click 'Account' and sign in once with Password & Steam Guard."
+                )
                 with self.lock:
                     self.history.append(task)
                     self.current_task = None

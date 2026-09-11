@@ -30,6 +30,7 @@ from vaporfetch.steamcmd import (
     auth_session,
     begin_qr_login,
     poll_qr_login,
+    has_steamcmd_cached_credentials,
 )
 from vaporfetch.library import (
     get_library,
@@ -100,6 +101,9 @@ if FastAPI is not None:
         api_key = settings.get("steam_api_key") or settings.get("api_key") or os.environ.get("STEAM_API_KEY", "")
         session["has_api_key"] = bool(api_key)
         session["auth_method"] = session.get("auth_method", "steamcmd")
+        username = session.get("username", "")
+        has_pwd = bool(auth_session.pending_password and auth_session.username == username)
+        session["has_steamcmd_auth"] = bool(has_pwd or has_steamcmd_cached_credentials(username))
         return {
             "session": session,
             "auth_state": {

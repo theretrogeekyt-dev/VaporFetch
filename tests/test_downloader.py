@@ -48,6 +48,65 @@ class TestDownloader(unittest.TestCase):
         state = mgr.get_queue_state()
         self.assertEqual(len(state["queue"]), 0)
 
+    def test_run_app_download_without_credentials(self):
+        from unittest.mock import patch
+        from vaporfetch.steamcmd import run_app_download, auth_session
+        auth_session.reset()
+        with patch("vaporfetch.steamcmd.has_steamcmd_cached_credentials", return_value=False):
+            res = run_app_download(
+                appid=2280,
+                install_dir="/downloads/DOOM + DOOM II",
+                username="reaper360vr",
+            )
+            self.assertFalse(res["success"])
+            self.assertIn("SteamCMD credentials not found", res["error"])
+
+    def test_run_app_download_sanitizes_plus_in_cmd(self):
+        from unittest.mock import patch, MagicMock
+        from vaporfetch.steamcmd import run_app_download, auth_session
+        auth_session.reset()
+        auth_session.pending_password = "dummy"
+        auth_session.username = "testuser"
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.readline.return_value = ""
+        mock_proc.poll.return_value = 0
+
+        with patch("subprocess.Popen", return_value=mock_proc) as mock_popen:
+            run_app_download(
+                appid=2280,
+                install_dir="/downloads/DOOM + DOOM II",
+                username="testuser",
+            )
+            mock_popen.assert_called_once()
+            called_cmd = mock_popen.call_args[0][0]
+            # Ensure install_dir argument had '+' replaced with '_'
+            self.assertIn("/downloads/DOOM _ DOOM II", called_cmd)
+            self.assertNotIn("/downloads/DOOM + DOOM II", called_cmd)
+
+    def test_save_current_session_preserves_metadata(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from vaporfetch.steamcmd import save_current_session, get_current_session
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_session = Path(tmpdir) / "session.json"
+            with patch("vaporfetch.steamcmd.SESSION_FILE", temp_session):
+                # Step 1: Save QR session with steam_id and access_token
+                save_current_session("reaper360vr", logged_in=True, steam_id="76561199132013751", access_token="token123", auth_method="qr")
+                s1 = get_current_session()
+                self.assertEqual(s1["steam_id"], "76561199132013751")
+                self.assertEqual(s1["access_token"], "token123")
+
+                # Step 2: Authenticate SteamCMD (steam_id passed as empty)
+                save_current_session("reaper360vr", logged_in=True, steam_id="", auth_method="steamcmd")
+                s2 = get_current_session()
+                # steam_id and access_token should still be preserved
+                self.assertEqual(s2["steam_id"], "76561199132013751")
+                self.assertEqual(s2["access_token"], "token123")
+                self.assertEqual(s2["auth_method"], "steamcmd")
+
 if __name__ == "__main__":
     unittest.main()
 

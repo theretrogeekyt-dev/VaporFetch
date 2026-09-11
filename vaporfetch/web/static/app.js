@@ -107,6 +107,14 @@ document.addEventListener("DOMContentLoaded", () => {
     twoFactorCancelBtn: document.getElementById("twoFactorCancelBtn"),
     loginDoneBtn: document.getElementById("loginDoneBtn"),
     logoutBtn: document.getElementById("logoutBtn"),
+    authStatusAlert: document.getElementById("authStatusAlert"),
+    authStatusText: document.getElementById("authStatusText"),
+    authUsernameDisplay: document.getElementById("authUsernameDisplay"),
+    authSteamIdDisplay: document.getElementById("authSteamIdDisplay"),
+    authWebStatus: document.getElementById("authWebStatus"),
+    authSteamCmdStatus: document.getElementById("authSteamCmdStatus"),
+    authSteamCmdMissingNotice: document.getElementById("authSteamCmdMissingNotice"),
+    linkSteamCmdBtn: document.getElementById("linkSteamCmdBtn"),
     libraryErrorBanner: document.getElementById("libraryErrorBanner"),
     libraryErrorText: document.getElementById("libraryErrorText"),
     viewLogsBtn: document.getElementById("viewLogsBtn"),
@@ -164,7 +172,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (session && session.logged_in && session.username) {
       state.user = session;
       elements.userName.textContent = session.username;
-      elements.authBtn.textContent = "Account";
+      elements.authBtn.textContent = session.has_steamcmd_auth ? "Account" : "Account (Web Only)";
       elements.authBtn.classList.remove("btn-outline");
       elements.authBtn.classList.add("btn-secondary");
     } else {
@@ -313,21 +321,43 @@ document.addEventListener("DOMContentLoaded", () => {
       fetchLibrary();
     });
 
+    elements.linkSteamCmdBtn?.addEventListener("click", () => {
+      openAuthModal(true);
+    });
+
     elements.logoutBtn.addEventListener("click", handleLogout);
   }
 
-  function openAuthModal() {
+  function openAuthModal(preferPassword = false) {
     elements.authModal.style.display = "flex";
     elements.loginError.style.display = "none";
     elements.twoFactorError.style.display = "none";
     if (elements.qrError) elements.qrError.style.display = "none";
     stopQRPolling();
 
-    if (state.user && state.user.logged_in) {
+    if (state.user && state.user.logged_in && !preferPassword) {
       if (elements.authModeTabs) elements.authModeTabs.style.display = "none";
       if (elements.authPanelPassword) elements.authPanelPassword.style.display = "none";
       if (elements.authPanelQR) elements.authPanelQR.style.display = "none";
       elements.loginStepSuccess.style.display = "block";
+
+      if (elements.authUsernameDisplay) elements.authUsernameDisplay.textContent = state.user.username || "-";
+      if (elements.authSteamIdDisplay) elements.authSteamIdDisplay.textContent = state.user.steam_id || "Auto-detected";
+      if (elements.authWebStatus) elements.authWebStatus.textContent = state.user.auth_method === "qr" ? "Active (QR Code)" : "Active (Web API)";
+
+      if (state.user.has_steamcmd_auth) {
+        if (elements.authSteamCmdStatus) elements.authSteamCmdStatus.innerHTML = "<span style='color: #48bb78;'>✅ Active & Ready</span>";
+        if (elements.authSteamCmdMissingNotice) elements.authSteamCmdMissingNotice.style.display = "none";
+        if (elements.linkSteamCmdBtn) elements.linkSteamCmdBtn.style.display = "none";
+        if (elements.authStatusAlert) elements.authStatusAlert.className = "alert alert-success";
+        if (elements.authStatusText) elements.authStatusText.textContent = "✅ Fully Authenticated (SteamCMD ready for downloads)";
+      } else {
+        if (elements.authSteamCmdStatus) elements.authSteamCmdStatus.innerHTML = "<span style='color: #ecc94b;'>⚠️ Not Authenticated</span>";
+        if (elements.authSteamCmdMissingNotice) elements.authSteamCmdMissingNotice.style.display = "block";
+        if (elements.linkSteamCmdBtn) elements.linkSteamCmdBtn.style.display = "inline-flex";
+        if (elements.authStatusAlert) elements.authStatusAlert.className = "alert alert-info";
+        if (elements.authStatusText) elements.authStatusText.textContent = "ℹ️ Signed in via QR (Web API only)";
+      }
     } else {
       if (elements.authModeTabs) elements.authModeTabs.style.display = "flex";
       if (elements.authTabPassword) elements.authTabPassword.classList.add("active");
@@ -338,7 +368,12 @@ document.addEventListener("DOMContentLoaded", () => {
       elements.loginStep2FA.style.display = "none";
       elements.loginStepSuccess.style.display = "none";
       if (elements.loginSteamGuard) elements.loginSteamGuard.value = "";
-      elements.loginUsername.focus();
+      if (state.user && state.user.username) {
+        elements.loginUsername.value = state.user.username;
+        elements.loginPassword.focus();
+      } else {
+        elements.loginUsername.focus();
+      }
     }
   }
 
@@ -786,7 +821,23 @@ document.addEventListener("DOMContentLoaded", () => {
     elements.backupSelectedBtn.disabled = count === 0;
   }
 
+  function checkSteamCmdAuthBeforeDownload() {
+    if (state.user && state.user.logged_in && !state.user.has_steamcmd_auth) {
+      const confirmAuth = confirm(
+        "Notice: You are currently signed in via Steam QR Code (Web API).\n\n" +
+        "Valve requires an authenticated SteamCMD session (Password & Steam Guard) to download game files.\n\n" +
+        "Would you like to enter your Password & Steam Guard now to link download credentials?"
+      );
+      if (confirmAuth) {
+        openAuthModal(true);
+        return false;
+      }
+    }
+    return true;
+  }
+
   async function queueSelectedGames() {
+    if (!checkSteamCmdAuthBeforeDownload()) return;
     const appids = Array.from(state.selectedAppIds);
     if (appids.length === 0) return;
 
@@ -810,6 +861,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function queueAllGames() {
+    if (!checkSteamCmdAuthBeforeDownload()) return;
     if (!confirm(`Are you sure you want to backup all ${state.games.length} games in your library?`)) {
       return;
     }
@@ -830,6 +882,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function queueAppId(appid, name = null) {
+    if (!checkSteamCmdAuthBeforeDownload()) return;
     const platform = elements.platformSelect.value;
     try {
       const res = await fetch("/api/queue/add", {

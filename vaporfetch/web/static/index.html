@@ -344,12 +344,37 @@
 
           <!-- Step 3: Authenticated State -->
           <div id="loginStepSuccess" style="display: none;">
-            <div class="alert alert-success">
-              <span>✅ Logged in successfully!</span>
+            <div id="authStatusAlert" class="alert alert-success">
+              <span id="authStatusText">✅ Logged in successfully!</span>
             </div>
-            <p>Your session is active and cached for container restarts.</p>
-            <div class="modal-footer">
-              <button class="btn btn-primary" id="loginDoneBtn">Close</button>
+            
+            <div id="authDetailsBox" style="margin: 14px 0; font-size: 0.9em; background: var(--color-bg-secondary, #1a202c); padding: 14px; border-radius: 6px; border: 1px solid var(--color-border, #2d3748);">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                <span style="color: var(--color-text-muted, #a0aec0);">Account:</span>
+                <strong id="authUsernameDisplay">-</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                <span style="color: var(--color-text-muted, #a0aec0);">SteamID:</span>
+                <code id="authSteamIdDisplay">-</code>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                <span style="color: var(--color-text-muted, #a0aec0);">Web API Library:</span>
+                <span id="authWebStatus">Connected</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: var(--color-text-muted, #a0aec0);">SteamCMD Downloads:</span>
+                <span id="authSteamCmdStatus">Checking...</span>
+              </div>
+            </div>
+
+            <div id="authSteamCmdMissingNotice" class="alert alert-warning" style="display: none; font-size: 0.88em; margin-bottom: 14px;">
+              <span>⚠️ <strong>SteamCMD Login Required for Game Downloads</strong><br>
+              QR code sign-in enables library browsing via Web API, but Valve requires an authenticated SteamCMD session with Password &amp; Steam Guard to download game files.</span>
+            </div>
+
+            <div class="modal-footer" style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-primary" id="linkSteamCmdBtn" style="display: none;">🔑 Link SteamCMD (Password &amp; 2FA)</button>
+              <button class="btn btn-secondary" id="loginDoneBtn">Close</button>
               <button class="btn btn-danger" id="logoutBtn">Log Out</button>
             </div>
           </div>
@@ -360,7 +385,7 @@
 
   </div>
 
-  <script src="/static/app.js?v=1.0.3"></script>
+  <script src="/static/app.js?v=1.0.4"></script>
 </body>
 </html>
 

@@ -148,7 +148,7 @@ resolver = AppResolver()
 
 def sanitize_folder_name(name: str) -> str:
     """Sanitize game title for safe folder creation across Linux/Windows/Mac."""
-    clean = re.sub(r'[\\/*?:"<>|]', "_", name)
+    clean = re.sub(r'[\\/*?:"<>|+]', "_", name)
     clean = re.sub(r"\s+", " ", clean).strip()
     return clean or "Unknown_Game"
 

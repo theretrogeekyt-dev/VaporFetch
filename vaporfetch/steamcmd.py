@@ -36,7 +36,10 @@ RE_STEAM_GUARD = re.compile(
     r"(Steam Guard code:|Steam Guard Mobile Authenticator|Two-factor code:|Account Logon Denied|Need Two Factor|result code 65|result code 85)",
     re.IGNORECASE
 )
-RE_LOGIN_SUCCESS = re.compile(r"(Logged in OK|Waiting for user info\.\.\.OK|Success\.)", re.IGNORECASE)
+RE_LOGIN_SUCCESS = re.compile(
+    r"(Logged in OK|Waiting for user info\.\.\..*?OK|Waiting for confirmation\.\.\.OK|Waiting for client config\.\.\.OK|Success\.|(?:^|[\r\n])\s*Steam>)",
+    re.IGNORECASE | re.DOTALL
+)
 RE_LOGIN_FAIL = re.compile(
     r"(?:FAILED|ERROR)\s*\((.*?)\)|(?:FAILED|ERROR) with result code\s+([0-9]+)|(?:FAILED|ERROR)\s*:\s*(.*)",
     re.IGNORECASE
@@ -665,8 +668,13 @@ def _monitor_login_pty():
             accumulated += chunk
             auth_session._output_buffer.append(chunk)
             for line in chunk.splitlines():
-                if line.strip():
-                    log_steamcmd(line.strip())
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                # Sanitize sensitive password if echoed by PTY terminal discipline
+                if auth_session.pending_password and auth_session.pending_password in line_str:
+                    continue
+                log_steamcmd(line_str)
 
             # Check for interactive password prompt in accumulated output
             if not auth_session.password_injected and re.search(r"(?:^|[\r\n])[^\r\n]*?[Pp]assword:\s*", accumulated):

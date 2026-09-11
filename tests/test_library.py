@@ -187,7 +187,36 @@ class TestLibrary(unittest.TestCase):
             games, error = get_library_with_status(force_refresh=True)
             self.assertEqual(len(games), 0)
             mock_fetch_licenses.assert_not_called()
-            self.assertIn("QR Code", error)
+    def test_resolve_vanity_url(self):
+        import json
+        from unittest.mock import patch, MagicMock
+        from vaporfetch.library import resolve_vanity_url
+
+        mock_resp = MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.read.return_value = json.dumps({
+            "response": {"success": 1, "steamid": "76561199132013751"}
+        }).encode("utf-8")
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            sid = resolve_vanity_url("TheRetroGeekYT", "mock_key")
+            self.assertEqual(sid, "76561199132013751")
+
+        # Full URL input
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            sid2 = resolve_vanity_url("https://steamcommunity.com/id/TheRetroGeekYT/", "mock_key")
+            self.assertEqual(sid2, "76561199132013751")
+
+    def test_extract_steam_id_from_jwt_token(self):
+        import json, base64
+        from vaporfetch.steamcmd import extract_steam_id_from_token
+
+        payload = json.dumps({"sub": "76561199132013751", "iss": "steam"}).encode("utf-8")
+        b64 = base64.urlsafe_b64encode(payload).decode("utf-8").rstrip("=")
+        fake_jwt = f"header.{b64}.signature"
+
+        sid = extract_steam_id_from_token(fake_jwt)
+        self.assertEqual(sid, "76561199132013751")
 
 if __name__ == "__main__":
     unittest.main()

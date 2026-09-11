@@ -79,6 +79,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "validate_downloads": os.environ.get("VALIDATE_DOWNLOADS", "true").lower() in ("true", "1", "yes"),
     "folder_format": "{name}",  # Options: '{name}', '{name} ({appid})', '{appid}'
     "steam_api_key": os.environ.get("STEAM_API_KEY", ""),
+    "custom_steam_id": os.environ.get("STEAM_ID", ""),
     "speed_limit_kb": 0,  # 0 for unlimited
 }
 

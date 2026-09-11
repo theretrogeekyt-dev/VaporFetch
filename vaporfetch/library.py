@@ -265,6 +265,28 @@ def populate_and_cache_games(app_ids: Set[int]) -> List[Dict[str, Any]]:
     return games
 
 
+def resolve_vanity_url(vanity: str, api_key: str) -> Optional[str]:
+    """Resolve a Steam custom vanity URL or name into a 64-bit SteamID."""
+    if not vanity or not api_key:
+        return None
+    clean = vanity.strip().rstrip("/")
+    if "/" in clean:
+        clean = clean.split("/")[-1]
+    if clean.isdigit() and len(clean) >= 16:
+        return clean
+    try:
+        url = f"https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key={api_key}&vanityurl={urllib.parse.quote(clean)}"
+        req = urllib.request.Request(url, headers={"User-Agent": "VaporFetch/1.0"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            res = data.get("response", {})
+            if res.get("success") == 1:
+                return str(res.get("steamid"))
+    except Exception:
+        pass
+    return None
+
+
 def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str, Any]], str]:
     """
     Retrieve user's owned games library along with any status or error messages.
@@ -294,10 +316,30 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
     error_msg = ""
 
     # 1. If we have steam_id and (access_token or api_key), query official Steam Web API GetOwnedGames
-    steam_id = session.get("steam_id")
-    access_token = session.get("access_token")
+    steam_id = session.get("steam_id", "")
+    access_token = session.get("access_token", "")
+    refresh_token = session.get("refresh_token", "")
     settings = load_settings()
     api_key = settings.get("steam_api_key") or settings.get("api_key") or os.environ.get("STEAM_API_KEY", "")
+    custom_id = settings.get("custom_steam_id") or settings.get("steam_id", "")
+
+    # Auto-resolve steam_id if not present in session
+    if not steam_id:
+        from vaporfetch.steamcmd import extract_steam_id_from_token
+        steam_id = extract_steam_id_from_token(access_token) or extract_steam_id_from_token(refresh_token)
+
+    # Check custom_steam_id in settings or vanity URL
+    if not steam_id and custom_id:
+        steam_id = resolve_vanity_url(custom_id, api_key) if api_key else (custom_id if custom_id.isdigit() else "")
+
+    # Fallback to username if vanity name matches
+    if not steam_id and username and api_key:
+        steam_id = resolve_vanity_url(username, api_key) or ""
+
+    # Persist resolved steam_id to session
+    if steam_id and steam_id != session.get("steam_id"):
+        session["steam_id"] = steam_id
+        save_current_session(username, **session)
 
     web_api_error = ""
     api_key_valid = False

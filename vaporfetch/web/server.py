@@ -72,6 +72,7 @@ if FastAPI is not None:
         validate_downloads: Optional[bool] = None
         folder_format: Optional[str] = None
         steam_api_key: Optional[str] = None
+        custom_steam_id: Optional[str] = None
 
     @app.middleware("http")
     async def add_cache_control_headers(request: Request, call_next):

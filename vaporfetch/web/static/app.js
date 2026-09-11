@@ -75,6 +75,7 @@ document.addEventListener("DOMContentLoaded", () => {
     settingFolderFormat: document.getElementById("settingFolderFormat"),
     settingValidate: document.getElementById("settingValidate"),
     settingApiKey: document.getElementById("settingApiKey"),
+    settingCustomSteamId: document.getElementById("settingCustomSteamId"),
 
     // Modal
     authModal: document.getElementById("authModal"),
@@ -966,6 +967,7 @@ document.addEventListener("DOMContentLoaded", () => {
         folder_format: elements.settingFolderFormat.value,
         validate_downloads: elements.settingValidate.checked,
         steam_api_key: elements.settingApiKey.value.trim(),
+        custom_steam_id: elements.settingCustomSteamId ? elements.settingCustomSteamId.value.trim() : "",
       };
 
       try {
@@ -976,8 +978,8 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         if (res.ok) {
           alert("Settings saved successfully!");
-          if (updates.steam_api_key) {
-            if (state.user) state.user.has_api_key = true;
+          if (updates.steam_api_key || updates.custom_steam_id) {
+            if (state.user && updates.steam_api_key) state.user.has_api_key = true;
             fetchLibrary(true);
           }
         }
@@ -1001,6 +1003,9 @@ document.addEventListener("DOMContentLoaded", () => {
       if (data.folder_format) elements.settingFolderFormat.value = data.folder_format;
       if (data.validate_downloads !== undefined) elements.settingValidate.checked = data.validate_downloads;
       if (data.steam_api_key) elements.settingApiKey.value = data.steam_api_key;
+      if (data.custom_steam_id && elements.settingCustomSteamId) {
+        elements.settingCustomSteamId.value = data.custom_steam_id;
+      }
     } catch (e) {
       console.error("Failed to load settings:", e);
     }

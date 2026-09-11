@@ -221,6 +221,25 @@ def has_steamcmd_cached_credentials(username: str = "") -> bool:
     return False
 
 
+def extract_steam_id_from_token(token: str) -> str:
+    """Extract 64-bit SteamID from JWT access or refresh token."""
+    if not token or "." not in token:
+        return ""
+    try:
+        import base64
+        parts = token.split(".")
+        if len(parts) >= 2:
+            payload = parts[1]
+            payload += "=" * ((4 - len(payload) % 4) % 4)
+            data = json.loads(base64.urlsafe_b64decode(payload.encode("utf-8")).decode("utf-8", errors="ignore"))
+            sub = str(data.get("sub", "")).strip()
+            if sub.isdigit() and len(sub) >= 16:
+                return sub
+    except Exception:
+        pass
+    return ""
+
+
 def begin_qr_login() -> Dict[str, Any]:
     """
     Initiate a Steam Mobile QR code login session via Steam's IAuthenticationService.
@@ -270,9 +289,13 @@ def poll_qr_login(client_id: str, request_id: str) -> Dict[str, Any]:
             # If user has confirmed and approved the login on their phone:
             if "refresh_token" in res or "access_token" in res or "account_name" in res:
                 account_name = res.get("account_name", "")
-                steam_id = res.get("steamid", "")
                 access_token = res.get("access_token", "")
                 refresh_token = res.get("refresh_token", "")
+                steam_id = (
+                    res.get("steamid", "")
+                    or extract_steam_id_from_token(access_token)
+                    or extract_steam_id_from_token(refresh_token)
+                )
 
                 auth_session.status = "logged_in"
                 auth_session.username = account_name

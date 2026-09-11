@@ -299,6 +299,9 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
     settings = load_settings()
     api_key = settings.get("steam_api_key") or settings.get("api_key") or os.environ.get("STEAM_API_KEY", "")
 
+    web_api_error = ""
+    api_key_valid = False
+
     if steam_id and (access_token or api_key):
         try:
             query = {
@@ -306,17 +309,17 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
                 "include_appinfo": 1,
                 "include_played_free_games": 1,
             }
-            if access_token:
-                query["access_token"] = access_token
             if api_key:
                 query["key"] = api_key
+            elif access_token:
+                query["access_token"] = access_token
+
             url = f"https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?{urllib.parse.urlencode(query)}"
             headers = {"User-Agent": "VaporFetch/1.0"}
-            if access_token:
-                headers["Authorization"] = f"Bearer {access_token}"
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
+                api_key_valid = True
                 for game in data.get("response", {}).get("games", []):
                     aid = game.get("appid")
                     name = game.get("name")
@@ -326,6 +329,14 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
                             resolver.app_map[int(aid)] = name
             if app_ids:
                 print(f"[VaporFetch] Retrieved {len(app_ids)} games via Steam Web API for SteamID {steam_id}")
+            elif api_key:
+                print(f"[VaporFetch] Web API key is valid, but account {steam_id} has private game details.")
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                web_api_error = "The configured Steam Web API Key was rejected by Steam (HTTP 401/403). Please verify your key in Settings."
+            else:
+                web_api_error = f"Steam Web API error: HTTP {e.code}"
+            print(f"[VaporFetch] Notice: Web API GetOwnedGames query: {e}")
         except Exception as e:
             print(f"[VaporFetch] Notice: Web API GetOwnedGames query: {e}")
 
@@ -339,14 +350,25 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
         # If user is signed in via QR code and SteamCMD has no credentials on disk,
         # do not invoke SteamCMD blindly
         if auth_method == "qr" and not has_pwd and not has_cached:
-            if not api_key:
+            if web_api_error:
+                error_msg = web_api_error
+            elif not api_key:
                 error_msg = (
-                    "Signed in via Steam Mobile QR Code. Valve's Web API keeps games private by default; "
-                    "enter your Steam Web API Key in Settings to sync your games, or sign in with Password & Steam Guard."
+                    "Signed in via Steam Mobile QR Code. Valve keeps game libraries private by default. "
+                    "Enter your Steam Web API Key in Settings and set Steam Game Details to Public to sync your games, "
+                    "or sign in with Password & Steam Guard."
+                )
+            elif api_key_valid and not app_ids:
+                error_msg = (
+                    "Your Steam Web API Key is valid, but your Steam account has 'Game Details' set to Private. "
+                    "In Steam, go to Profile -> Edit Profile -> Privacy Settings and set 'Game Details' to Public to load your games. "
+                    "Alternatively, sign in with Password & Steam Guard."
                 )
             else:
                 error_msg = (
-                    "Steam Web API returned 0 games. Check that your Steam profile game details are public or your API key is valid."
+                    "Signed in via Steam Mobile QR Code, but Steam Web API returned 0 games. "
+                    "Check your Steam Privacy Settings to ensure 'Game Details' are set to Public, "
+                    "or sign in with Password & Steam Guard."
                 )
         else:
             cmd_app_ids = fetch_licenses(username)

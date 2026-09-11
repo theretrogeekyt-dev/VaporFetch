@@ -106,6 +106,9 @@ document.addEventListener("DOMContentLoaded", () => {
     twoFactorCancelBtn: document.getElementById("twoFactorCancelBtn"),
     loginDoneBtn: document.getElementById("loginDoneBtn"),
     logoutBtn: document.getElementById("logoutBtn"),
+    libraryErrorBanner: document.getElementById("libraryErrorBanner"),
+    libraryErrorText: document.getElementById("libraryErrorText"),
+    viewLogsBtn: document.getElementById("viewLogsBtn"),
   };
 
   // --- Initialize App ---
@@ -591,11 +594,29 @@ document.addEventListener("DOMContentLoaded", () => {
         elements.manualAppId.value = "";
       }
     });
+
+    elements.viewLogsBtn?.addEventListener("click", () => {
+      document.querySelector('[data-tab="terminalTab"]')?.click();
+    });
+  }
+
+  let lastSyncError = "";
+
+  function showLibraryError(msg) {
+    if (!elements.libraryErrorBanner) return;
+    elements.libraryErrorText.textContent = msg;
+    elements.libraryErrorBanner.style.display = "flex";
+  }
+
+  function hideLibraryError() {
+    if (!elements.libraryErrorBanner) return;
+    elements.libraryErrorBanner.style.display = "none";
   }
 
   async function fetchLibrary(forceRefresh = false) {
     elements.gamesLoading.classList.remove("hidden");
     elements.gamesEmpty.classList.add("hidden");
+    hideLibraryError();
 
     try {
       const endpoint = forceRefresh ? "/api/library/refresh" : "/api/library";
@@ -606,9 +627,18 @@ document.addEventListener("DOMContentLoaded", () => {
       state.games = data.games || [];
       elements.libraryCountBadge.textContent = state.games.length;
 
+      lastSyncError = data.error || "";
+      if (data.error && state.games.length === 0) {
+        showLibraryError(data.error);
+      } else {
+        hideLibraryError();
+      }
+
       renderGames();
     } catch (e) {
       console.error("Error fetching library:", e);
+      lastSyncError = e.message;
+      showLibraryError(e.message);
     } finally {
       elements.gamesLoading.classList.add("hidden");
       if (state.games.length === 0) {
@@ -631,10 +661,16 @@ document.addEventListener("DOMContentLoaded", () => {
         if (elements.qrEmptyActions) elements.qrEmptyActions.style.display = "flex";
         if (elements.emptyLoginBtn) elements.emptyLoginBtn.style.display = "none";
       } else {
-        if (elements.emptyTitle) elements.emptyTitle.textContent = "No Games Found";
+        if (elements.emptyTitle) elements.emptyTitle.textContent = "No Games Detected";
         if (elements.emptySubtitle) {
-          elements.emptySubtitle.textContent =
-            "No owned games detected. Click 'Sync Steam Library' above to refresh licenses from SteamCMD, or add an AppID manually.";
+          if (lastSyncError) {
+            elements.emptySubtitle.innerHTML =
+              `<span style="color: #f87171; font-weight: 500; font-size: 1rem;">⚠️ ${escapeHtml(lastSyncError)}</span><br><br>` +
+              "Click 'Re-authenticate with Steam' below to enter your Steam credentials, or view 'SteamCMD Logs' in the top bar to inspect output.";
+          } else {
+            elements.emptySubtitle.textContent =
+              "No owned games detected. Click 'Sync Steam Library' above to refresh licenses from SteamCMD, or add an AppID manually.";
+          }
         }
         if (elements.qrEmptyActions) elements.qrEmptyActions.style.display = "none";
         if (elements.emptyLoginBtn) {

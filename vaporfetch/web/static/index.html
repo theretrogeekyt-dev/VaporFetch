@@ -107,6 +107,15 @@
 
         <!-- Games Grid -->
         <div class="games-container">
+          <!-- Live Sync Error & Status Banner -->
+          <div id="libraryErrorBanner" class="alert-banner" style="display: none; margin-bottom: 20px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 8px; padding: 12px 18px; align-items: center; gap: 12px;">
+            <span style="font-size: 1.3rem;">⚠️</span>
+            <div style="flex: 1; font-size: 0.95rem; color: #fca5a5;">
+              <strong>Sync Notice:</strong> <span id="libraryErrorText"></span>
+            </div>
+            <button class="btn btn-sm btn-outline" id="viewLogsBtn" type="button">📟 View SteamCMD Logs</button>
+          </div>
+
           <div id="gamesLoading" class="loading-spinner hidden">
             <div class="spinner"></div>
             <p>Syncing games from SteamCMD licenses... Please wait.</p>

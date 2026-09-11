@@ -33,6 +33,7 @@ from vaporfetch.steamcmd import (
 )
 from vaporfetch.library import (
     get_library,
+    get_library_with_status,
     resolver,
     check_backup_status,
 )
@@ -153,18 +154,20 @@ if FastAPI is not None:
 
     @app.get("/api/library")
     async def get_library_endpoint(refresh: bool = False):
-        games = get_library(force_refresh=refresh)
+        games, error = get_library_with_status(force_refresh=refresh)
         return {
             "count": len(games),
             "games": games,
+            "error": error,
         }
 
     @app.post("/api/library/refresh")
     async def refresh_library_endpoint():
-        games = get_library(force_refresh=True)
+        games, error = get_library_with_status(force_refresh=True)
         return {
             "count": len(games),
             "games": games,
+            "error": error,
         }
 
     @app.get("/api/queue")

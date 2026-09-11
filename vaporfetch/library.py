@@ -6,7 +6,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Set
+from typing import Dict, List, Any, Optional, Set, Tuple
 
 from vaporfetch.config import (
     DATA_DIR,
@@ -265,9 +265,9 @@ def populate_and_cache_games(app_ids: Set[int]) -> List[Dict[str, Any]]:
     return games
 
 
-def get_library(force_refresh: bool = False) -> List[Dict[str, Any]]:
+def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str, Any]], str]:
     """
-    Retrieve user's owned games library with backup status.
+    Retrieve user's owned games library along with any status or error messages.
     Uses cached licenses list, Web API if key/steamid available, or refreshes via SteamCMD.
     """
     session = get_current_session()
@@ -283,14 +283,15 @@ def get_library(force_refresh: bool = False) -> List[Dict[str, Any]]:
                     g["backup_status"] = status_info["status"]
                     g["backup_size"] = status_info["size_formatted"]
                     g["backup_size_bytes"] = status_info["size_bytes"]
-                return games
+                return games, ""
         except Exception:
             pass
 
     if not username:
-        return []
+        return [], "Not signed in. Please log in with your Steam account."
 
     app_ids: Set[int] = set()
+    error_msg = ""
 
     # 1. If we have steam_id and (access_token or api_key), query official Steam Web API GetOwnedGames
     steam_id = session.get("steam_id")
@@ -330,6 +331,9 @@ def get_library(force_refresh: bool = False) -> List[Dict[str, Any]]:
         cmd_app_ids = fetch_licenses(username)
         if cmd_app_ids:
             app_ids.update(cmd_app_ids)
+        else:
+            from vaporfetch.steamcmd import auth_session
+            error_msg = auth_session.last_error or "SteamCMD returned 0 owned game licenses."
 
     if not app_ids:
         # If refresh returned 0 licenses, preserve existing library cache if available
@@ -344,10 +348,17 @@ def get_library(force_refresh: bool = False) -> List[Dict[str, Any]]:
                             g["backup_status"] = status_info["status"]
                             g["backup_size"] = status_info["size_formatted"]
                             g["backup_size_bytes"] = status_info["size_bytes"]
-                        return cached_games
+                        return cached_games, error_msg
             except Exception:
                 pass
-        return []
+        return [], error_msg
 
-    return populate_and_cache_games(app_ids)
+    games = populate_and_cache_games(app_ids)
+    return games, ""
+
+
+def get_library(force_refresh: bool = False) -> List[Dict[str, Any]]:
+    """Retrieve user's owned games list (backwards compatible)."""
+    games, _ = get_library_with_status(force_refresh=force_refresh)
+    return games
 

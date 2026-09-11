@@ -145,5 +145,23 @@ class TestLibrary(unittest.TestCase):
             if temp_cache.exists():
                 temp_cache.unlink()
 
+    def test_get_library_with_status_error(self):
+        from unittest.mock import patch
+        from vaporfetch.library import get_library_with_status
+        from vaporfetch.steamcmd import auth_session
+
+        auth_session.last_error = "Steam session expired. Click 'Re-authenticate with Steam' to sign in."
+        mock_session = {"username": "testuser"}
+
+        with patch("vaporfetch.library.get_current_session", return_value=mock_session), \
+             patch("vaporfetch.library.load_settings", return_value={}), \
+             patch("vaporfetch.library.fetch_licenses", return_value=set()), \
+             patch("vaporfetch.library.LIBRARY_CACHE_FILE", Path("/tmp/non_existent_cache_file.json")):
+            games, error = get_library_with_status(force_refresh=True)
+            self.assertEqual(len(games), 0)
+            self.assertIn("expired", error.lower())
+
+        auth_session.reset()
+
 if __name__ == "__main__":
     unittest.main()

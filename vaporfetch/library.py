@@ -371,7 +371,7 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
     access_token = session.get("access_token", "")
     refresh_token = session.get("refresh_token", "")
     settings = load_settings()
-    api_key = settings.get("steam_api_key") or settings.get("api_key") or os.environ.get("STEAM_API_KEY", "")
+    api_key = (settings.get("steam_api_key") or settings.get("api_key") or os.environ.get("STEAM_API_KEY", "")).strip().strip('"').strip("'")
     custom_id = settings.get("custom_steam_id") or settings.get("steam_id", "")
 
     # Auto-resolve steam_id if not present in session
@@ -421,12 +421,17 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
                         if name:
                             resolver.app_map[int(aid)] = name
             if app_ids:
+                from vaporfetch.steamcmd import log_steamcmd
+                log_steamcmd(f"Retrieved {len(app_ids)} games from Steam Web API.")
                 print(f"[VaporFetch] Retrieved {len(app_ids)} games via Steam Web API for SteamID {steam_id}")
             elif api_key:
                 print(f"[VaporFetch] Web API key is valid, but account {steam_id} has private game details.")
         except urllib.error.HTTPError as e:
             if e.code in (401, 403):
-                web_api_error = "The configured Steam Web API Key was rejected by Steam (HTTP 401/403). Please verify your key in Settings."
+                if api_key:
+                    web_api_error = "The configured Steam Web API Key was rejected by Steam (HTTP 401/403). Please verify your 32-character key at https://steamcommunity.com/dev/apikey and update it in Settings."
+                else:
+                    web_api_error = f"Steam Web API rejected authentication (HTTP {e.code})."
             else:
                 web_api_error = f"Steam Web API error: HTTP {e.code}"
             print(f"[VaporFetch] Notice: Web API GetOwnedGames query: {e}")
@@ -482,13 +487,13 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
         # If user is signed in via QR code and SteamCMD has no credentials on disk,
         # do not invoke SteamCMD blindly
         if auth_method == "qr" and not has_pwd and not has_cached:
-            if web_api_error:
+            if api_key and web_api_error:
                 error_msg = web_api_error
             elif not api_key:
                 error_msg = (
                     "Signed in via Steam Mobile QR Code. Valve keeps game libraries private by default. "
-                    "Enter your Steam Web API Key in Settings and set Steam Game Details to Public to sync your games, "
-                    "or sign in with Password & Steam Guard."
+                    "In Steam, go to Profile -> Edit Profile -> Privacy Settings and set 'Game Details' to Public to sync your games, "
+                    "or click 'Account' and use 'Sign In' (Password & Steam Guard) to sync games directly and enable downloads."
                 )
             elif api_key_valid and not app_ids:
                 error_msg = (

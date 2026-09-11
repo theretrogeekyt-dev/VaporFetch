@@ -48,14 +48,15 @@ You do **not** need to manually clone or download code to run VaporFetch. You ca
        ports:
          - "8080:8080"
        environment:
+         - PUID=1000
+         - PGID=1000
+         - UMASK=000
          - DEFAULT_PLATFORM=windows
          - VALIDATE_DOWNLOADS=true
          - PORT=8080
        volumes:
          - ./data:/data
          - ./downloads:/downloads
-         - ./data/steam_root:/root/.steam
-         - ./data/steam_share:/root/.local/share/Steam
    ```
 4. Click **Next** and **Done**. Synology will automatically download the image and launch it.
 5. Open `http://<synology-ip>:8080` in your browser.
@@ -68,13 +69,23 @@ docker compose up -d
 
 ---
 
-## Docker Volumes
+## Docker Volumes & Permissions
 
 | Host Path | Container Path | Purpose |
 | :--- | :--- | :--- |
-| `./data` | `/data` | Configuration, cache, settings, and Steam session tokens (`session.json`, `library_cache.json`) |
+| `./data` | `/data` | Configuration, settings, library cache, and persistent Steam credentials (`/data/steam/`) |
 | `./downloads` | `/downloads` | Destination directory where games and Steam appmanifest files are saved |
-| `./data/steam_root` | `/root/.steam` | SteamCMD client cache and credential tokens |
+
+### Environment Variables
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `PUID` | `1000` | User ID for file ownership inside `/downloads` |
+| `PGID` | `1000` | Group ID for file ownership inside `/downloads` |
+| `UMASK` | `000` | File creation permissions mask (`000` ensures full read/write over Synology SMB shares) |
+| `DEFAULT_PLATFORM` | `windows` | Target depot platform (`windows`, `linux`, `macos`) |
+| `VALIDATE_DOWNLOADS` | `true` | Run SteamCMD checksum verification after downloading |
+| `PORT` | `8080` | Web dashboard HTTP listening port |
 
 ---
 

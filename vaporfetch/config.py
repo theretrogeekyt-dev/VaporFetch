@@ -26,42 +26,43 @@ DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 def ensure_steam_environment() -> None:
     """
     Ensure SteamCMD configuration and cached credentials persist across container restarts.
-    If running inside Docker, symlinks SteamCMD home directories to persistent /data subdirectories
-    unless they are already mounted directly.
+    If running inside Docker, ensures Steam paths point to persistent storage in /data/steam.
     """
+    steam_data = DATA_DIR / "steam"
+    (steam_data / "Steam" / "config").mkdir(parents=True, exist_ok=True)
+    (steam_data / ".steam" / "steam" / "config").mkdir(parents=True, exist_ok=True)
+    (steam_data / ".local" / "share" / "Steam").mkdir(parents=True, exist_ok=True)
+
+    # Migrate legacy directories if they exist
+    legacy_home = DATA_DIR / "steam_home"
+    if legacy_home.exists() and not (steam_data / "Steam" / "config" / "loginusers.vdf").exists():
+        try:
+            shutil.copytree(legacy_home, steam_data / "Steam", dirs_exist_ok=True)
+        except Exception:
+            pass
+
+    legacy_root = DATA_DIR / "steam_root"
+    if legacy_root.exists() and not (steam_data / ".steam" / "steam" / "config" / "config.vdf").exists():
+        try:
+            shutil.copytree(legacy_root, steam_data / ".steam", dirs_exist_ok=True)
+        except Exception:
+            pass
+
     if not is_in_docker():
         return
 
     steam_dirs = [
-        (Path("/root/Steam"), DATA_DIR / "steam_home"),
-        (Path("/root/.steam"), DATA_DIR / "steam_root"),
-        (Path("/root/.local/share/Steam"), DATA_DIR / "steam_share"),
+        (Path("/root/Steam"), steam_data / "Steam"),
+        (Path("/root/.steam"), steam_data / ".steam"),
+        (Path("/root/.local/share/Steam"), steam_data / ".local" / "share" / "Steam"),
     ]
     for link_target, persistent_dir in steam_dirs:
         try:
             persistent_dir.mkdir(parents=True, exist_ok=True)
-            # If target is already a symlink or an active mountpoint, do not touch it
             if os.path.islink(str(link_target)) or os.path.ismount(str(link_target)):
                 continue
             if link_target.exists():
-                if link_target.is_dir():
-                    try:
-                        has_items = any(persistent_dir.iterdir())
-                    except Exception:
-                        has_items = False
-                    # Migrate initial files if persistent directory is empty
-                    if not has_items:
-                        for item in link_target.iterdir():
-                            dest = persistent_dir / item.name
-                            if item.is_dir():
-                                shutil.copytree(item, dest, dirs_exist_ok=True)
-                            else:
-                                shutil.copy2(item, dest)
-                    shutil.rmtree(link_target)
-                else:
-                    link_target.unlink()
-            else:
-                link_target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.rmtree(link_target, ignore_errors=True)
             link_target.symlink_to(persistent_dir)
         except Exception:
             pass

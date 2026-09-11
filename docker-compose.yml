@@ -1,7 +1,6 @@
 services:
   vaporfetch:
     image: ghcr.io/theretrogeekyt-dev/vaporfetch:latest
-    pull_policy: always
     container_name: vaporfetch
     platform: linux/amd64
     restart: unless-stopped
@@ -10,6 +9,9 @@ services:
     ports:
       - "8080:8080"
     environment:
+      - PUID=1000
+      - PGID=1000
+      - UMASK=000
       - DEFAULT_PLATFORM=windows
       - VALIDATE_DOWNLOADS=true
       - STEAM_FORCE_IPV4=1
@@ -17,6 +19,3 @@ services:
     volumes:
       - ./data:/data
       - ./downloads:/downloads
-      - ./data/steam_root:/root/.steam
-      - ./data/steam_home:/root/Steam
-      - ./data/steam_share:/root/.local/share/Steam

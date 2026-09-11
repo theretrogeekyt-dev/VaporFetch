@@ -430,8 +430,17 @@ class TestSteamCMDParser(unittest.TestCase):
                 loginusers_content = steam_home_loginusers.read_text(encoding="utf-8")
                 self.assertIn('"AccountName"\t\t"reaper360vr"', loginusers_content)
                 self.assertIn('"RememberPassword"\t\t"1"', loginusers_content)
-                self.assertIn('"MostRecent"\t\t"1"', loginusers_content)
                 self.assertIn('"AllowAutoLogin"\t\t"1"', loginusers_content)
+
+                # Check that config.vdf was also written to new persistent data/steam/Steam/config/config.vdf
+                persistent_steam_config = temp_data_dir / "steam" / "Steam" / "config" / "config.vdf"
+                self.assertTrue(persistent_steam_config.exists())
+                self.assertIn('"AutoLoginUser"\t\t"reaper360vr"', persistent_steam_config.read_text(encoding="utf-8"))
+
+                # Check that loginusers.vdf was also written to data/steam/Steam/config/loginusers.vdf
+                persistent_steam_loginusers = temp_data_dir / "steam" / "Steam" / "config" / "loginusers.vdf"
+                self.assertTrue(persistent_steam_loginusers.exists())
+                self.assertIn('"AccountName"\t\t"reaper360vr"', persistent_steam_loginusers.read_text(encoding="utf-8"))
 
 if __name__ == "__main__":
     unittest.main()

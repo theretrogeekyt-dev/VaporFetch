@@ -194,6 +194,9 @@ def write_steam_login_config(
         return
 
     search_dirs = [
+        DATA_DIR / "steam" / "Steam",
+        DATA_DIR / "steam" / ".steam",
+        DATA_DIR / "steam" / ".steam" / "steam",
         DATA_DIR / "steam_home",
         DATA_DIR / "steam_root",
         DATA_DIR / "steam_share",
@@ -279,6 +282,9 @@ def has_steamcmd_cached_credentials(username: str = "") -> bool:
             return True
 
     search_dirs = [
+        DATA_DIR / "steam" / "Steam",
+        DATA_DIR / "steam" / ".steam",
+        DATA_DIR / "steam" / ".steam" / "steam",
         Path.home() / "Steam",
         Path.home() / ".steam",
         Path.home() / ".steam" / "steam",

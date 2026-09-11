@@ -163,5 +163,31 @@ class TestLibrary(unittest.TestCase):
 
         auth_session.reset()
 
+    def test_get_library_qr_login_does_not_invoke_steamcmd_without_credentials(self):
+        from unittest.mock import patch
+        from pathlib import Path
+        from vaporfetch.library import get_library_with_status
+        from vaporfetch.steamcmd import auth_session
+
+        auth_session.reset()
+        qr_session = {
+            "username": "reaper360vr",
+            "logged_in": True,
+            "steam_id": "76561198000000000",
+            "access_token": "mock_token",
+            "auth_method": "qr",
+        }
+
+        with patch("vaporfetch.library.get_current_session", return_value=qr_session), \
+             patch("vaporfetch.library.load_settings", return_value={}), \
+             patch("urllib.request.urlopen", side_effect=Exception("Private profile")), \
+             patch("vaporfetch.steamcmd.has_steamcmd_cached_credentials", return_value=False), \
+             patch("vaporfetch.library.fetch_licenses") as mock_fetch_licenses, \
+             patch("vaporfetch.library.LIBRARY_CACHE_FILE", Path("/tmp/non_existent_cache_qr.json")):
+            games, error = get_library_with_status(force_refresh=True)
+            self.assertEqual(len(games), 0)
+            mock_fetch_licenses.assert_not_called()
+            self.assertIn("QR Code", error)
+
 if __name__ == "__main__":
     unittest.main()

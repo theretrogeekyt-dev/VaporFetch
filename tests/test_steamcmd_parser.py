@@ -279,7 +279,7 @@ class TestSteamCMDParser(unittest.TestCase):
             app_ids = fetch_licenses("reaper360vr")
             self.assertEqual(app_ids, set())
             mock_run.assert_not_called()
-            mock_save.assert_called_with("reaper360vr", logged_in=False)
+            mock_save.assert_not_called()
             self.assertIn("Re-authenticate", auth_session.last_error)
 
     def test_fetch_licenses_handles_cached_credentials_missing_output(self):
@@ -302,7 +302,7 @@ class TestSteamCMDParser(unittest.TestCase):
              patch("subprocess.run", return_value=mock_proc):
             app_ids = fetch_licenses("reaper360vr")
             self.assertEqual(app_ids, set())
-            mock_save.assert_called_with("reaper360vr", logged_in=False)
+            mock_save.assert_not_called()
             self.assertIn("Re-authenticate", auth_session.last_error)
             self.assertNotIn("Invalid Steam password", auth_session.last_error)
 

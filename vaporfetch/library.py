@@ -311,7 +311,10 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
             if api_key:
                 query["key"] = api_key
             url = f"https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?{urllib.parse.urlencode(query)}"
-            req = urllib.request.Request(url, headers={"User-Agent": "VaporFetch/1.0"})
+            headers = {"User-Agent": "VaporFetch/1.0"}
+            if access_token:
+                headers["Authorization"] = f"Bearer {access_token}"
+            req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 for game in data.get("response", {}).get("games", []):
@@ -328,12 +331,29 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
 
     # 2. Try SteamCMD licenses if not populated via Web API
     if not app_ids and username:
-        cmd_app_ids = fetch_licenses(username)
-        if cmd_app_ids:
-            app_ids.update(cmd_app_ids)
+        auth_method = session.get("auth_method", "steamcmd")
+        from vaporfetch.steamcmd import auth_session, has_steamcmd_cached_credentials
+        has_pwd = bool(auth_session.pending_password and auth_session.username == username)
+        has_cached = has_steamcmd_cached_credentials(username)
+
+        # If user is signed in via QR code and SteamCMD has no credentials on disk,
+        # do not invoke SteamCMD blindly
+        if auth_method == "qr" and not has_pwd and not has_cached:
+            if not api_key:
+                error_msg = (
+                    "Signed in via Steam Mobile QR Code. Valve's Web API keeps games private by default; "
+                    "enter your Steam Web API Key in Settings to sync your games, or sign in with Password & Steam Guard."
+                )
+            else:
+                error_msg = (
+                    "Steam Web API returned 0 games. Check that your Steam profile game details are public or your API key is valid."
+                )
         else:
-            from vaporfetch.steamcmd import auth_session
-            error_msg = auth_session.last_error or "SteamCMD returned 0 owned game licenses."
+            cmd_app_ids = fetch_licenses(username)
+            if cmd_app_ids:
+                app_ids.update(cmd_app_ids)
+            else:
+                error_msg = auth_session.last_error or "SteamCMD returned 0 owned game licenses."
 
     if not app_ids:
         # If refresh returned 0 licenses, preserve existing library cache if available

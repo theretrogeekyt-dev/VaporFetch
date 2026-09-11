@@ -177,25 +177,47 @@ def save_current_session(username: str, logged_in: bool = True, steam_id: str = 
 
 def has_steamcmd_cached_credentials(username: str = "") -> bool:
     """Check if SteamCMD has existing cached login tokens on disk."""
-    home = Path.home()
-    candidates = [
-        home / "Steam" / "config" / "config.vdf",
-        home / ".steam" / "steam" / "config" / "config.vdf",
-        home / ".steam" / "config" / "config.vdf",
-        home / ".local" / "share" / "Steam" / "config" / "config.vdf",
-        DATA_DIR / "steam_root" / "steam" / "config" / "config.vdf",
-        DATA_DIR / "steam_root" / "config" / "config.vdf",
-        DATA_DIR / "steam_home" / "config" / "config.vdf",
+    search_dirs = [
+        Path.home() / "Steam",
+        Path.home() / ".steam",
+        Path.home() / ".steam" / "steam",
+        Path.home() / ".local" / "share" / "Steam",
+        Path("/opt/steamcmd"),
+        DATA_DIR / "steam_home",
+        DATA_DIR / "steam_root",
+        DATA_DIR / "steam_share",
     ]
-    for c in candidates:
-        if c.exists():
-            try:
-                content = c.read_text(encoding="utf-8", errors="ignore")
-                if "ConnectCache" in content or "Accounts" in content:
-                    if not username or username.lower() in content.lower():
+    for base in search_dirs:
+        # 1. Check loginusers.vdf
+        for cand in [base / "config" / "loginusers.vdf", base / "loginusers.vdf"]:
+            if cand.exists():
+                try:
+                    text = cand.read_text(encoding="utf-8", errors="ignore")
+                    if not username or username.lower() in text.lower():
                         return True
+                except Exception:
+                    pass
+
+        # 2. Check config.vdf
+        for cand in [base / "config" / "config.vdf", base / "config.vdf"]:
+            if cand.exists():
+                try:
+                    text = cand.read_text(encoding="utf-8", errors="ignore")
+                    if "ConnectCache" in text or "Accounts" in text or (username and username.lower() in text.lower()):
+                        return True
+                except Exception:
+                    pass
+
+        # 3. Check userdata directory
+        ud = base / "userdata"
+        if ud.is_dir():
+            try:
+                subdirs = [d for d in ud.iterdir() if d.is_dir() and d.name.isdigit()]
+                if subdirs:
+                    return True
             except Exception:
                 pass
+
     return False
 
 
@@ -345,9 +367,9 @@ def start_login(username: str, password: Optional[str] = None, code: Optional[st
     thread.start()
 
     # Wait for initial outcome:
-    # If code was provided upfront, wait up to 25s for the full login flow and licenses to complete
-    # If code was not provided, wait until awaiting_2fa is detected or 15s
-    timeout_secs = 25.0 if auth_session.pending_code else 15.0
+    # If code was provided upfront, wait up to 50s for the full login flow and licenses to complete
+    # If code was not provided, wait until awaiting_2fa is detected or 40s
+    timeout_secs = 50.0 if auth_session.pending_code else 40.0
     start_time = time.time()
     while time.time() - start_time < timeout_secs:
         if auth_session.status in ("logged_in", "failed"):
@@ -375,7 +397,7 @@ def _monitor_login_pty():
             os.write(master_fd, b"licenses_print\n")
             read_start = time.time()
             got_licenses = False
-            while time.time() - read_start < 25.0:
+            while time.time() - read_start < 45.0:
                 if auth_session.process and auth_session.process.poll() is not None:
                     try:
                         r, _, _ = select.select([master_fd], [], [], 0.3)
@@ -565,7 +587,7 @@ def submit_2fa_code(code: str) -> Dict[str, Any]:
             auth_session.code_injected_at = len("".join(auth_session._output_buffer))
             os.write(auth_session.master_fd, f"{clean_code}\n".encode("utf-8"))
             start_time = time.time()
-            while time.time() - start_time < 25.0:
+            while time.time() - start_time < 60.0:
                 if auth_session.status in ("logged_in", "failed"):
                     break
                 time.sleep(0.2)
@@ -596,7 +618,7 @@ def submit_2fa_code(code: str) -> Dict[str, Any]:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            timeout=30,
+            timeout=60,
             check=False,
         )
         out = res.stdout or ""
@@ -604,6 +626,9 @@ def submit_2fa_code(code: str) -> Dict[str, Any]:
         result = check_login_output(out)
         if result:
             if result["status"] == "logged_in":
+                auth_session.status = "logged_in"
+                auth_session.username = username
+                auth_session.pending_password = password
                 save_current_session(username, logged_in=True, auth_method="steamcmd")
                 owned_app_ids = parse_licenses_output(out)
                 if owned_app_ids:
@@ -613,7 +638,6 @@ def submit_2fa_code(code: str) -> Dict[str, Any]:
                         logger.info(f"Cached {len(owned_app_ids)} owned games from fallback verification.")
                     except Exception as e:
                         logger.error(f"Error caching owned games: {e}")
-                auth_session.status = "logged_in"
                 return {"status": "logged_in", "username": username}
             elif result["status"] == "failed":
                 return result
@@ -666,7 +690,6 @@ def fetch_licenses(username: str) -> Set[int]:
     if not pwd and not has_steamcmd_cached_credentials(username):
         auth_session.last_error = "Steam credentials expired or missing. Please click 'Re-authenticate with Steam' to sign in."
         log_steamcmd(f"Notice: No active password or SteamCMD cached credentials for '{username}'. Re-authentication required.")
-        save_current_session(username, logged_in=False)
         return set()
 
     cmd = [steamcmd_bin]
@@ -699,7 +722,6 @@ def fetch_licenses(username: str) -> Set[int]:
         if not pwd and ("cached credentials not found" in out.lower() or "password:" in out.lower() or "invalid password" in out.lower() or "not logged on" in out.lower()):
             auth_session.last_error = "Steam credentials expired or missing. Please click 'Re-authenticate with Steam' to sign in."
             log_steamcmd("SteamCMD: Cached credentials expired or not found. Re-authentication required.")
-            save_current_session(username, logged_in=False)
             return set()
 
         # Determine if any specific error occurred

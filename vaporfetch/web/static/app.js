@@ -463,7 +463,7 @@ document.addEventListener("DOMContentLoaded", () => {
       let authResult = data;
       if (authResult.status === "authenticating") {
         elements.loginSubmitBtn.textContent = "Connecting to Steam servers...";
-        for (let i = 0; i < 20; i++) {
+        for (let i = 0; i < 45; i++) {
           await new Promise((r) => setTimeout(r, 1000));
           const checkRes = await fetch("/api/login/status");
           if (checkRes.ok) {

@@ -45,6 +45,7 @@ if FastAPI is not None:
     class LoginRequest(BaseModel):
         username: str
         password: Optional[str] = None
+        code: Optional[str] = None
 
     class TwoFactorRequest(BaseModel):
         code: str
@@ -111,7 +112,7 @@ if FastAPI is not None:
     async def login_endpoint(payload: LoginRequest):
         if not payload.username:
             raise HTTPException(status_code=400, detail="Username is required")
-        result = start_login(payload.username.strip(), payload.password)
+        result = start_login(payload.username.strip(), payload.password, payload.code)
         return result
 
     @app.post("/api/login/2fa")

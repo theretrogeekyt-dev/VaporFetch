@@ -79,6 +79,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loginStepSuccess: document.getElementById("loginStepSuccess"),
     loginUsername: document.getElementById("loginUsername"),
     loginPassword: document.getElementById("loginPassword"),
+    loginSteamGuard: document.getElementById("loginSteamGuard"),
     loginError: document.getElementById("loginError"),
     loginSubmitBtn: document.getElementById("loginSubmitBtn"),
     loginCancelBtn: document.getElementById("loginCancelBtn"),
@@ -234,6 +235,25 @@ document.addEventListener("DOMContentLoaded", () => {
 
     elements.loginSubmitBtn.addEventListener("click", handleLoginSubmit);
     elements.twoFactorSubmitBtn.addEventListener("click", handle2FASubmit);
+
+    if (elements.loginSteamGuard) {
+      elements.loginSteamGuard.addEventListener("input", (e) => {
+        e.target.value = e.target.value.toUpperCase();
+        if (e.target.value.trim().length === 5 && elements.loginUsername.value.trim()) {
+          handleLoginSubmit();
+        }
+      });
+      elements.loginSteamGuard.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") handleLoginSubmit();
+      });
+    }
+
+    elements.twoFactorCode.addEventListener("input", (e) => {
+      e.target.value = e.target.value.toUpperCase();
+      if (e.target.value.trim().length === 5) {
+        handle2FASubmit();
+      }
+    });
     elements.twoFactorCode.addEventListener("keypress", (e) => {
       if (e.key === "Enter") handle2FASubmit();
     });
@@ -259,6 +279,7 @@ document.addEventListener("DOMContentLoaded", () => {
       elements.loginStepCredentials.style.display = "block";
       elements.loginStep2FA.style.display = "none";
       elements.loginStepSuccess.style.display = "none";
+      if (elements.loginSteamGuard) elements.loginSteamGuard.value = "";
       elements.loginUsername.focus();
     }
   }
@@ -270,6 +291,7 @@ document.addEventListener("DOMContentLoaded", () => {
   async function handleLoginSubmit() {
     const username = elements.loginUsername.value.trim();
     const password = elements.loginPassword.value;
+    const code = elements.loginSteamGuard ? elements.loginSteamGuard.value.trim() : "";
 
     if (!username) {
       showLoginError("Please enter your Steam username.");
@@ -284,7 +306,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password: password || null }),
+        body: JSON.stringify({ username, password: password || null, code: code || null }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -324,7 +346,7 @@ document.addEventListener("DOMContentLoaded", () => {
       showLoginError(`Network error: ${e.message}`);
     } finally {
       elements.loginSubmitBtn.disabled = false;
-      elements.loginSubmitBtn.textContent = "Continue";
+      elements.loginSubmitBtn.textContent = "Sign In";
     }
   }
 

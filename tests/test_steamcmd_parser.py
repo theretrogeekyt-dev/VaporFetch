@@ -120,6 +120,30 @@ class TestSteamCMDParser(unittest.TestCase):
         self.assertEqual(m_err.group(1), "730")
         self.assertEqual(m_err.group(2), "No subscription")
 
+    def test_start_login_with_upfront_code(self):
+        from unittest.mock import patch, MagicMock
+        from vaporfetch.steamcmd import start_login
+
+        with patch("vaporfetch.steamcmd.find_steamcmd_path", return_value="/usr/local/bin/steamcmd"), \
+             patch("subprocess.run") as mock_run, \
+             patch("vaporfetch.steamcmd.save_current_session") as mock_save:
+
+            mock_res = MagicMock()
+            mock_res.stdout = "Logging in user 'testuser' to Steam Public...Logged in OK\nWaiting for user info...OK"
+            mock_run.return_value = mock_res
+
+            res = start_login("testuser", "secretpass", "R4NDM")
+            self.assertEqual(res["status"], "logged_in")
+            self.assertEqual(res["username"], "testuser")
+
+            # Check that +set_steam_guard_code was passed directly in cmd args
+            called_cmd = mock_run.call_args[0][0]
+            self.assertIn("+set_steam_guard_code", called_cmd)
+            self.assertIn("R4NDM", called_cmd)
+            self.assertIn("+login", called_cmd)
+            self.assertIn("testuser", called_cmd)
+
 if __name__ == "__main__":
     unittest.main()
+
 

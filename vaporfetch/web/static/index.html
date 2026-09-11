@@ -269,10 +269,15 @@
               <input type="password" id="loginPassword" class="text-input" placeholder="Password" autocomplete="current-password">
               <small class="form-hint">Leave blank if you previously logged in and have remembered credentials.</small>
             </div>
+            <div class="form-group">
+              <label for="loginSteamGuard">Steam Guard Code (Optional / Faster Login):</label>
+              <input type="text" id="loginSteamGuard" class="text-input code-input" placeholder="e.g. R4NDM" maxlength="10" autocomplete="off">
+              <small class="form-hint">Have your Steam Mobile App open? Enter the 5-digit code here to sign in instantly before it expires!</small>
+            </div>
             <div id="loginError" class="alert alert-error" style="display: none;"></div>
             <div class="modal-footer">
               <button class="btn btn-secondary" id="loginCancelBtn">Cancel</button>
-              <button class="btn btn-primary" id="loginSubmitBtn">Continue</button>
+              <button class="btn btn-primary" id="loginSubmitBtn">Sign In</button>
             </div>
           </div>
 
@@ -285,7 +290,7 @@
             <div class="form-group">
               <label for="twoFactorCode">Steam Guard Code:</label>
               <input type="text" id="twoFactorCode" class="text-input code-input" placeholder="e.g. R4NDM" maxlength="10" autofocus>
-              <small class="form-hint">Check your Steam Mobile App or registered Email.</small>
+              <small class="form-hint">Tip: If the code on your phone is about to expire, wait 2–3 seconds for a fresh code, then enter it.</small>
             </div>
             <div id="twoFactorError" class="alert alert-error" style="display: none;"></div>
             <div class="modal-footer">

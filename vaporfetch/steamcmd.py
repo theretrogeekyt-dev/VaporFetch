@@ -158,9 +158,10 @@ def clear_session() -> None:
             pass
 
 
-def start_login(username: str, password: Optional[str] = None) -> Dict[str, Any]:
+def start_login(username: str, password: Optional[str] = None, code: Optional[str] = None) -> Dict[str, Any]:
     """
     Initiate an interactive SteamCMD login session.
+    If code is provided upfront, directly uses +set_steam_guard_code for instant sign-in.
     Returns status: 'logged_in', 'awaiting_2fa', 'authenticating', or 'failed'.
     """
     auth_session.reset()
@@ -169,6 +170,56 @@ def start_login(username: str, password: Optional[str] = None) -> Dict[str, Any]
     auth_session.status = "authenticating"
 
     steamcmd_bin = find_steamcmd_path()
+
+    # If code is supplied upfront (e.g. from Steam Mobile Authenticator), execute directly!
+    if code and code.strip():
+        clean_code = code.strip()
+        cmd = [
+            steamcmd_bin,
+            "+set_steam_guard_code", clean_code,
+            "+login", username,
+        ]
+        if password:
+            cmd.append(password)
+        cmd.append("+quit")
+
+        try:
+            res = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            out = res.stdout or ""
+            result = check_login_output(out)
+            if result:
+                if result["status"] == "logged_in":
+                    auth_session.status = "logged_in"
+                    auth_session.pending_password = None
+                    save_current_session(username, logged_in=True)
+                    return {"status": "logged_in", "username": username}
+                elif result["status"] == "awaiting_2fa":
+                    auth_session.status = "awaiting_2fa"
+                    auth_session.prompt_message = result.get("prompt", "Enter Steam Guard code")
+                    return {
+                        "status": "awaiting_2fa",
+                        "prompt": auth_session.prompt_message,
+                        "two_factor_type": auth_session.two_factor_type,
+                    }
+                elif result["status"] == "failed":
+                    auth_session.status = "failed"
+                    auth_session.error_message = result.get("error", "Login failed")
+                    return {"status": "failed", "error": auth_session.error_message}
+
+            if "Invalid Password" in out:
+                auth_session.status = "failed"
+                return {"status": "failed", "error": "Invalid Steam password."}
+
+            return {"status": "failed", "error": "Authentication failed. Check credentials and code."}
+        except Exception as e:
+            return {"status": "failed", "error": f"Failed to execute steamcmd: {e}"}
 
     cmd = [steamcmd_bin]
     if password:

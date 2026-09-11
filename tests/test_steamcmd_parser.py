@@ -254,6 +254,58 @@ class TestSteamCMDParser(unittest.TestCase):
 
         auth_session.reset()
 
+    def test_re_login_fail_matches_error_format(self):
+        from vaporfetch.steamcmd import RE_LOGIN_FAIL, check_login_output
+        m1 = RE_LOGIN_FAIL.search("Logging in user 'reaper360vr' to Steam Public...ERROR (Invalid Password)")
+        self.assertIsNotNone(m1)
+        self.assertEqual(m1.group(1), "Invalid Password")
+
+        res = check_login_output("Logging in user 'reaper360vr' to Steam Public...ERROR (Invalid Password)")
+        self.assertIsNotNone(res)
+        self.assertEqual(res["status"], "failed")
+        self.assertIn("password", res["error"].lower())
+
+    def test_fetch_licenses_without_password_and_no_cached_credentials(self):
+        from unittest.mock import patch
+        from vaporfetch.steamcmd import fetch_licenses, auth_session
+
+        auth_session.reset()
+        auth_session.username = "reaper360vr"
+        auth_session.pending_password = None
+
+        with patch("vaporfetch.steamcmd.has_steamcmd_cached_credentials", return_value=False), \
+             patch("vaporfetch.steamcmd.save_current_session") as mock_save, \
+             patch("subprocess.run") as mock_run:
+            app_ids = fetch_licenses("reaper360vr")
+            self.assertEqual(app_ids, set())
+            mock_run.assert_not_called()
+            mock_save.assert_called_with("reaper360vr", logged_in=False)
+            self.assertIn("Re-authenticate", auth_session.last_error)
+
+    def test_fetch_licenses_handles_cached_credentials_missing_output(self):
+        from unittest.mock import patch, MagicMock
+        from vaporfetch.steamcmd import fetch_licenses, auth_session
+
+        auth_session.reset()
+        auth_session.username = "reaper360vr"
+        auth_session.pending_password = None
+
+        mock_proc = MagicMock()
+        mock_proc.stdout = (
+            "Cached credentials not found.\n"
+            "password:\n"
+            "Logging in user 'reaper360vr' to Steam Public...ERROR (Invalid Password)\n"
+        )
+
+        with patch("vaporfetch.steamcmd.has_steamcmd_cached_credentials", return_value=True), \
+             patch("vaporfetch.steamcmd.save_current_session") as mock_save, \
+             patch("subprocess.run", return_value=mock_proc):
+            app_ids = fetch_licenses("reaper360vr")
+            self.assertEqual(app_ids, set())
+            mock_save.assert_called_with("reaper360vr", logged_in=False)
+            self.assertIn("Re-authenticate", auth_session.last_error)
+            self.assertNotIn("Invalid Steam password", auth_session.last_error)
+
 if __name__ == "__main__":
     unittest.main()
 

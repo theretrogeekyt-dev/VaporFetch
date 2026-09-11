@@ -18,4 +18,5 @@ services:
       - ./data:/data
       - ./downloads:/downloads
       - ./data/steam_root:/root/.steam
+      - ./data/steam_home:/root/Steam
       - ./data/steam_share:/root/.local/share/Steam

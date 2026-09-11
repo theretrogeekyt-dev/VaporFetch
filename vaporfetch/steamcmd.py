@@ -34,7 +34,7 @@ RE_STEAM_GUARD = re.compile(
 )
 RE_LOGIN_SUCCESS = re.compile(r"(Logged in OK|Waiting for user info\.\.\.OK|Success\.)", re.IGNORECASE)
 RE_LOGIN_FAIL = re.compile(
-    r"FAILED\s*\((.*?)\)|FAILED with result code\s+([0-9]+)|FAILED\s*:\s*(.*)",
+    r"(?:FAILED|ERROR)\s*\((.*?)\)|(?:FAILED|ERROR) with result code\s+([0-9]+)|(?:FAILED|ERROR)\s*:\s*(.*)",
     re.IGNORECASE
 )
 
@@ -173,6 +173,30 @@ def save_current_session(username: str, logged_in: bool = True, steam_id: str = 
     }
     with open(SESSION_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
+
+
+def has_steamcmd_cached_credentials(username: str = "") -> bool:
+    """Check if SteamCMD has existing cached login tokens on disk."""
+    home = Path.home()
+    candidates = [
+        home / "Steam" / "config" / "config.vdf",
+        home / ".steam" / "steam" / "config" / "config.vdf",
+        home / ".steam" / "config" / "config.vdf",
+        home / ".local" / "share" / "Steam" / "config" / "config.vdf",
+        DATA_DIR / "steam_root" / "steam" / "config" / "config.vdf",
+        DATA_DIR / "steam_root" / "config" / "config.vdf",
+        DATA_DIR / "steam_home" / "config" / "config.vdf",
+    ]
+    for c in candidates:
+        if c.exists():
+            try:
+                content = c.read_text(encoding="utf-8", errors="ignore")
+                if "ConnectCache" in content or "Accounts" in content:
+                    if not username or username.lower() in content.lower():
+                        return True
+            except Exception:
+                pass
+    return False
 
 
 def begin_qr_login() -> Dict[str, Any]:
@@ -637,6 +661,14 @@ def fetch_licenses(username: str) -> Set[int]:
 
     steamcmd_bin = find_steamcmd_path()
     pwd = auth_session.pending_password if auth_session.username == username else None
+
+    # If we have neither an in-memory password nor cached credentials on disk, do not run SteamCMD blindly
+    if not pwd and not has_steamcmd_cached_credentials(username):
+        auth_session.last_error = "Steam credentials expired or missing. Please click 'Re-authenticate with Steam' to sign in."
+        log_steamcmd(f"Notice: No active password or SteamCMD cached credentials for '{username}'. Re-authentication required.")
+        save_current_session(username, logged_in=False)
+        return set()
+
     cmd = [steamcmd_bin]
     if pwd:
         cmd.extend(["+login", username, pwd])
@@ -663,6 +695,13 @@ def fetch_licenses(username: str) -> Set[int]:
         app_ids = parse_licenses_output(out)
         print(f"[VaporFetch] licenses_print for {username} completed. Output {len(out)} bytes, parsed {len(app_ids)} AppIDs.")
 
+        # If no password was provided on CLI and SteamCMD failed or prompted for one
+        if not pwd and ("cached credentials not found" in out.lower() or "password:" in out.lower() or "invalid password" in out.lower() or "not logged on" in out.lower()):
+            auth_session.last_error = "Steam credentials expired or missing. Please click 'Re-authenticate with Steam' to sign in."
+            log_steamcmd("SteamCMD: Cached credentials expired or not found. Re-authentication required.")
+            save_current_session(username, logged_in=False)
+            return set()
+
         # Determine if any specific error occurred
         login_res = check_login_output(out)
         if login_res and login_res.get("status") == "failed":
@@ -670,9 +709,6 @@ def fetch_licenses(username: str) -> Set[int]:
             log_steamcmd(f"SteamCMD error: {auth_session.last_error}")
         elif login_res and login_res.get("status") == "awaiting_2fa":
             auth_session.last_error = "Steam Guard code required. Click 'Re-authenticate with Steam' to sign in."
-            log_steamcmd(f"SteamCMD notice: {auth_session.last_error}")
-        elif not pwd and ("password" in out.lower() or "not logged on" in out.lower() or "login failed" in out.lower()):
-            auth_session.last_error = "Steam session expired. Click 'Re-authenticate with Steam' to sign in with your credentials."
             log_steamcmd(f"SteamCMD notice: {auth_session.last_error}")
         elif not app_ids:
             if "not logged on" in out.lower() or "no connection" in out.lower():

@@ -89,6 +89,15 @@ if FastAPI is not None:
             "storage": get_storage_stats(),
         }
 
+    @app.get("/api/login/status")
+    async def login_status_endpoint():
+        return {
+            "status": auth_session.status,
+            "prompt": auth_session.prompt_message,
+            "error": auth_session.error_message,
+            "two_factor_type": auth_session.two_factor_type,
+        }
+
     @app.post("/api/login")
     async def login_endpoint(payload: LoginRequest):
         if not payload.username:

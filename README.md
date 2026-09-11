@@ -30,45 +30,41 @@
 
 ---
 
-## Quickstart with Docker Compose (Recommended)
+## Quickstart (Synology NAS / Docker Compose)
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/theretrogeekyt-dev/VaporFetch.git
-   cd VaporFetch
+You do **not** need to manually clone or download code to run VaporFetch. You can deploy it using only the `docker-compose.yml` file:
+
+### On Synology NAS (Container Manager)
+1. Open **Container Manager** > **Project** > **Create**.
+2. Set Project Name to `vaporfetch` and Path to `/docker/vaporfetch`.
+3. Select **Create docker-compose.yaml** and paste:
+   ```yaml
+   services:
+     vaporfetch:
+       image: ghcr.io/theretrogeekyt-dev/vaporfetch:latest
+       container_name: vaporfetch
+       platform: linux/amd64
+       restart: unless-stopped
+       ports:
+         - "8080:8080"
+       environment:
+         - DEFAULT_PLATFORM=windows
+         - VALIDATE_DOWNLOADS=true
+         - PORT=8080
+       volumes:
+         - ./data:/data
+         - ./downloads:/downloads
+         - ./data/steam_root:/root/.steam
+         - ./data/steam_share:/root/.local/share/Steam
    ```
+4. Click **Next** and **Done**. Synology will automatically download the image and launch it.
+5. Open `http://<synology-ip>:8080` in your browser.
 
-2. **Start the container**:
-   ```bash
-   docker compose up -d
-   ```
-
-3. **Open the Web UI**:
-   Navigate to [http://localhost:8080](http://localhost:8080) in your browser.
-
-4. **Sign In**:
-   Click **Login**, enter your Steam username and password, and enter your Steam Guard code when prompted.
-
----
-
-## Running with Docker CLI
-
-If you prefer using `docker run` directly:
-
+### On Standard Docker Host
+Save the snippet above as `docker-compose.yml` and run:
 ```bash
-docker run -d \
-  --name vaporfetch \
-  --platform linux/amd64 \
-  -p 8080:8080 \
-  -v $(pwd)/data:/data \
-  -v $(pwd)/downloads:/downloads \
-  --restart unless-stopped \
-  vaporfetch:latest
+docker compose up -d
 ```
-
-> [!TIP]
-> **Apple Silicon (M1/M2/M3/M4) and ARM Devices**:
-> SteamCMD is distributed by Valve as a 32-bit x86 binary. The container specifies `--platform linux/amd64` so Docker can run it under Rosetta 2 or QEMU emulation.
 
 ---
 

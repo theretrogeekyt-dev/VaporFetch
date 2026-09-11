@@ -20,10 +20,11 @@ RE_APP_ERROR = re.compile(r"ERROR! Failed to install app '([0-9]+)' \((.*?)\)", 
 RE_LICENSES_APP = re.compile(r"Apps\s*:\s*([0-9, ]+)")
 RE_LICENSES_PKG = re.compile(r"License packageID\s+([0-9]+):")
 
-# 2FA prompts in SteamCMD
+# 2FA prompts and result codes in SteamCMD
 RE_STEAM_GUARD = re.compile(r"(Steam Guard code:|Steam Guard Mobile Authenticator|Two-factor code:)", re.IGNORECASE)
 RE_LOGIN_SUCCESS = re.compile(r"(Logged in OK|Waiting for user info\.\.\.OK)", re.IGNORECASE)
-RE_LOGIN_FAIL = re.compile(r"(FAILED with result code|Invalid Password|Rate Limit Exceeded|Login Failure)", re.IGNORECASE)
+RE_LOGIN_FAIL_CODE = re.compile(r"FAILED with result code\s+([0-9]+)", re.IGNORECASE)
+RE_LOGIN_FAIL_TEXT = re.compile(r"(Invalid Password|Rate Limit Exceeded|Login Failure|Account Logon Denied)", re.IGNORECASE)
 
 class SteamCMDAuthSession:
     """Manages an active interactive login session with SteamCMD."""
@@ -31,7 +32,9 @@ class SteamCMDAuthSession:
         self.process: Optional[subprocess.Popen] = None
         self.master_fd: Optional[int] = None
         self.username: str = ""
+        self.pending_password: Optional[str] = None
         self.status: str = "idle"  # idle, authenticating, awaiting_2fa, logged_in, failed
+        self.two_factor_type: str = "email"
         self.error_message: str = ""
         self.prompt_message: str = ""
         self.lock = threading.Lock()
@@ -52,7 +55,9 @@ class SteamCMDAuthSession:
             self.process = None
             self.master_fd = None
             self.username = ""
+            self.pending_password = None
             self.status = "idle"
+            self.two_factor_type = "email"
             self.error_message = ""
             self.prompt_message = ""
             self._output_buffer = []
@@ -96,9 +101,13 @@ def clear_session() -> None:
 def start_login(username: str, password: Optional[str] = None) -> Dict[str, Any]:
     """
     Initiate an interactive SteamCMD login session.
-    Returns status: 'logged_in', 'awaiting_2fa', or 'failed'.
+    Returns status: 'logged_in', 'awaiting_2fa', 'authenticating', or 'failed'.
     """
     auth_session.reset()
+    auth_session.username = username
+    auth_session.pending_password = password
+    auth_session.status = "authenticating"
+
     steamcmd_bin = find_steamcmd_path()
 
     cmd = [steamcmd_bin]
@@ -132,24 +141,23 @@ def start_login(username: str, password: Optional[str] = None) -> Dict[str, Any]
 
     auth_session.process = proc
     auth_session.master_fd = master_fd
-    auth_session.username = username
-    auth_session.status = "authenticating"
 
-    # Monitor output in background thread or wait initial window
+    # Monitor output in background thread
     thread = threading.Thread(target=_monitor_login_pty, daemon=True)
     thread.start()
 
-    # Wait up to 5 seconds for immediate outcome (success or 2FA request)
+    # Wait up to 10 seconds for initial outcome
     start_time = time.time()
-    while time.time() - start_time < 5.0:
+    while time.time() - start_time < 10.0:
         if auth_session.status in ("logged_in", "awaiting_2fa", "failed"):
             break
-        time.sleep(0.2)
+        time.sleep(0.25)
 
     return {
         "status": auth_session.status,
         "prompt": auth_session.prompt_message,
         "error": auth_session.error_message,
+        "two_factor_type": auth_session.two_factor_type,
     }
 
 
@@ -174,13 +182,46 @@ def _monitor_login_pty():
             accumulated += chunk
             auth_session._output_buffer.append(chunk)
 
-            # Check for Steam Guard prompt
+            # Check for Steam Guard prompt text
             if RE_STEAM_GUARD.search(accumulated) and auth_session.status != "awaiting_2fa":
                 auth_session.status = "awaiting_2fa"
                 if "Mobile Authenticator" in accumulated:
-                    auth_session.prompt_message = "Enter Steam Guard Mobile Authenticator code"
+                    auth_session.prompt_message = "Enter the current code from your Steam Mobile Authenticator"
+                    auth_session.two_factor_type = "mobile"
                 else:
                     auth_session.prompt_message = "Enter Steam Guard code sent to your email"
+                    auth_session.two_factor_type = "email"
+
+            # Check for Steam result codes
+            code_match = RE_LOGIN_FAIL_CODE.search(accumulated)
+            if code_match:
+                result_code = int(code_match.group(1))
+                if result_code == 65:  # k_EResultAccountLogonDenied (Email 2FA)
+                    auth_session.status = "awaiting_2fa"
+                    auth_session.prompt_message = "Steam Guard code sent to your email"
+                    auth_session.two_factor_type = "email"
+                    break
+                elif result_code == 85:  # k_EResultAccountLogonDeniedNeedTwoFactorCode (Mobile 2FA)
+                    auth_session.status = "awaiting_2fa"
+                    auth_session.prompt_message = "Enter code from your Steam Mobile Authenticator"
+                    auth_session.two_factor_type = "mobile"
+                    break
+                elif result_code == 5:
+                    auth_session.status = "failed"
+                    auth_session.error_message = "Invalid Steam password. Please verify your credentials."
+                    break
+                elif result_code == 84:
+                    auth_session.status = "failed"
+                    auth_session.error_message = "Rate limit exceeded. Steam has temporarily throttled login. Please wait a few minutes."
+                    break
+                elif result_code in (88, 89):
+                    auth_session.status = "failed"
+                    auth_session.error_message = "Steam Guard code mismatch. Please request a new code."
+                    break
+                else:
+                    auth_session.status = "failed"
+                    auth_session.error_message = f"Steam login failed (Result code {result_code})."
+                    break
 
             # Check for login success
             if RE_LOGIN_SUCCESS.search(accumulated):
@@ -188,50 +229,123 @@ def _monitor_login_pty():
                 save_current_session(auth_session.username, logged_in=True)
                 break
 
-            # Check for login failure
-            fail_match = RE_LOGIN_FAIL.search(accumulated)
-            if fail_match:
+            # Check for other fail texts
+            if "Invalid Password" in accumulated:
                 auth_session.status = "failed"
-                auth_session.error_message = f"Login failed: {fail_match.group(0)}"
+                auth_session.error_message = "Invalid Steam password."
                 break
 
         except OSError:
             break
 
-    # If process exited and not logged in
+    # If process exited
     if auth_session.status == "authenticating":
+        # Check if login success was printed before process exited
         if RE_LOGIN_SUCCESS.search(accumulated):
             auth_session.status = "logged_in"
             save_current_session(auth_session.username, logged_in=True)
         else:
-            auth_session.status = "failed"
-            auth_session.error_message = auth_session.error_message or "SteamCMD process closed unexpectedly."
+            code_match = RE_LOGIN_FAIL_CODE.search(accumulated)
+            if code_match:
+                rc = int(code_match.group(1))
+                if rc == 65:
+                    auth_session.status = "awaiting_2fa"
+                    auth_session.prompt_message = "Steam Guard code sent to your email"
+                    auth_session.two_factor_type = "email"
+                elif rc == 85:
+                    auth_session.status = "awaiting_2fa"
+                    auth_session.prompt_message = "Enter code from your Steam Mobile Authenticator"
+                    auth_session.two_factor_type = "mobile"
+                elif rc == 5:
+                    auth_session.status = "failed"
+                    auth_session.error_message = "Invalid Steam password."
+                elif rc == 84:
+                    auth_session.status = "failed"
+                    auth_session.error_message = "Rate limit exceeded. Please wait a few minutes."
+                else:
+                    auth_session.status = "failed"
+                    auth_session.error_message = f"Steam login failed (Result code {rc})."
+            elif RE_STEAM_GUARD.search(accumulated):
+                auth_session.status = "awaiting_2fa"
+            else:
+                auth_session.status = "failed"
+                auth_session.error_message = auth_session.error_message or "SteamCMD process closed unexpectedly."
 
 
 def submit_2fa_code(code: str) -> Dict[str, Any]:
-    """Send Steam Guard 2FA code to the running SteamCMD process."""
-    if auth_session.status != "awaiting_2fa" or not auth_session.master_fd:
-        return {"status": "failed", "error": "No active session waiting for 2FA."}
+    """
+    Send Steam Guard 2FA code to authenticate.
+    Handles both active PTY streams and direct execution via set_steam_guard_code.
+    """
+    clean_code = code.strip()
+    if not clean_code:
+        return {"status": "failed", "error": "Steam Guard code cannot be empty."}
 
-    clean_code = code.strip() + "\n"
+    username = auth_session.username
+    password = auth_session.pending_password
+
+    # 1. Try sending to active PTY if process is alive
+    if auth_session.process and auth_session.process.poll() is None and auth_session.master_fd:
+        try:
+            os.write(auth_session.master_fd, f"{clean_code}\n".encode("utf-8"))
+            start_time = time.time()
+            while time.time() - start_time < 8.0:
+                if auth_session.status in ("logged_in", "failed"):
+                    break
+                time.sleep(0.2)
+            if auth_session.status == "logged_in":
+                auth_session.pending_password = None
+                return {"status": "logged_in", "username": username}
+        except Exception:
+            pass
+
+    # 2. Process exited after code 65/85 (standard SteamCMD behavior).
+    # Submit via `+set_steam_guard_code`
+    steamcmd_bin = find_steamcmd_path()
+    cmd = [
+        steamcmd_bin,
+        "+set_steam_guard_code", clean_code,
+        "+login", username,
+    ]
+    if password:
+        cmd.append(password)
+    cmd.append("+quit")
+
     try:
-        os.write(auth_session.master_fd, clean_code.encode("utf-8"))
+        res = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        out = res.stdout or ""
+
+        if RE_LOGIN_SUCCESS.search(out):
+            auth_session.status = "logged_in"
+            auth_session.pending_password = None
+            save_current_session(username, logged_in=True)
+            return {"status": "logged_in", "username": username}
+
+        code_match = RE_LOGIN_FAIL_CODE.search(out)
+        if code_match:
+            rc = int(code_match.group(1))
+            if rc in (88, 89):
+                return {"status": "failed", "error": "Incorrect Steam Guard code. Please try again."}
+            elif rc == 84:
+                return {"status": "failed", "error": "Rate limit exceeded. Please wait a few minutes."}
+            elif rc == 5:
+                return {"status": "failed", "error": "Invalid password."}
+            else:
+                return {"status": "failed", "error": f"Login failed (Result code {rc})."}
+
+        if "Invalid Password" in out:
+            return {"status": "failed", "error": "Invalid password."}
+
+        return {"status": "failed", "error": "Verification failed. Check the code and try again."}
     except Exception as e:
-        auth_session.status = "failed"
-        auth_session.error_message = f"Error sending 2FA code: {e}"
-        return {"status": "failed", "error": auth_session.error_message}
-
-    # Wait up to 6 seconds for response
-    start_time = time.time()
-    while time.time() - start_time < 6.0:
-        if auth_session.status in ("logged_in", "failed"):
-            break
-        time.sleep(0.2)
-
-    return {
-        "status": auth_session.status,
-        "error": auth_session.error_message,
-    }
+        return {"status": "failed", "error": f"Failed to execute verification: {e}"}
 
 
 def parse_licenses_output(output: str) -> Set[int]:

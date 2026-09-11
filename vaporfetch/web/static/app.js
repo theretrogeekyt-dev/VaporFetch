@@ -286,20 +286,34 @@ document.addEventListener("DOMContentLoaded", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password: password || null }),
       });
-      const data = await res.json();
+      let authResult = data;
+      if (authResult.status === "authenticating") {
+        elements.loginSubmitBtn.textContent = "Connecting to Steam servers...";
+        for (let i = 0; i < 20; i++) {
+          await new Promise((r) => setTimeout(r, 1000));
+          const checkRes = await fetch("/api/login/status");
+          if (checkRes.ok) {
+            const checkData = await checkRes.json();
+            if (checkData.status && checkData.status !== "authenticating") {
+              authResult = checkData;
+              break;
+            }
+          }
+        }
+      }
 
-      if (data.status === "awaiting_2fa") {
+      if (authResult.status === "awaiting_2fa") {
         elements.loginStepCredentials.style.display = "none";
         elements.loginStep2FA.style.display = "block";
-        elements.twoFactorPromptText.textContent = data.prompt || "Enter Steam Guard code";
+        elements.twoFactorPromptText.textContent = authResult.prompt || "Enter Steam Guard code";
         elements.twoFactorCode.value = "";
         elements.twoFactorCode.focus();
-      } else if (data.status === "logged_in") {
+      } else if (authResult.status === "logged_in") {
         elements.loginStepCredentials.style.display = "none";
         elements.loginStepSuccess.style.display = "block";
         fetchInitialStatus();
       } else {
-        showLoginError(data.error || "Login failed. Please verify credentials.");
+        showLoginError(authResult.error || "Login failed. Please verify credentials.");
       }
     } catch (e) {
       showLoginError(`Network error: ${e.message}`);

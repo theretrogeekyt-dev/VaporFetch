@@ -4,7 +4,7 @@ from vaporfetch.steamcmd import (
     parse_licenses_output,
     RE_STEAM_GUARD,
     RE_LOGIN_SUCCESS,
-    RE_LOGIN_FAIL,
+    RE_LOGIN_FAIL_CODE,
     RE_APP_SUCCESS,
     RE_APP_ERROR,
 )
@@ -68,12 +68,23 @@ class TestSteamCMDParser(unittest.TestCase):
         success_line1 = "Logged in OK"
         success_line2 = "Waiting for user info...OK"
         fail_line = "FAILED with result code 5"
-        pw_fail = "Invalid Password"
+        code65 = "FAILED with result code 65"
+        code85 = "FAILED with result code 85"
 
         self.assertTrue(bool(RE_LOGIN_SUCCESS.search(success_line1)))
         self.assertTrue(bool(RE_LOGIN_SUCCESS.search(success_line2)))
-        self.assertTrue(bool(RE_LOGIN_FAIL.search(fail_line)))
-        self.assertTrue(bool(RE_LOGIN_FAIL.search(pw_fail)))
+        
+        m_code = RE_LOGIN_FAIL_CODE.search(fail_line)
+        self.assertIsNotNone(m_code)
+        self.assertEqual(int(m_code.group(1)), 5)
+
+        m_65 = RE_LOGIN_FAIL_CODE.search(code65)
+        self.assertIsNotNone(m_65)
+        self.assertEqual(int(m_65.group(1)), 65)
+
+        m_85 = RE_LOGIN_FAIL_CODE.search(code85)
+        self.assertIsNotNone(m_85)
+        self.assertEqual(int(m_85.group(1)), 85)
 
     def test_app_success_and_error(self):
         succ = "Success! App '730' fully installed."

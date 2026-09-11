@@ -84,6 +84,37 @@ class TestDownloader(unittest.TestCase):
             self.assertIn("/downloads/DOOM _ DOOM II", called_cmd)
             self.assertNotIn("/downloads/DOOM + DOOM II", called_cmd)
 
+    def test_run_app_download_success_flow(self):
+        from unittest.mock import patch, MagicMock
+        from vaporfetch.steamcmd import run_app_download, auth_session
+        auth_session.reset()
+        auth_session.pending_password = "dummy"
+        auth_session.username = "testuser"
+
+        logs = []
+        progresses = []
+
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = 0
+
+        with patch("subprocess.Popen", return_value=mock_proc), \
+             patch("select.select", return_value=([999], [], [])), \
+             patch("os.read", side_effect=[
+                 b"Update state (0x61) downloading, progress: 50.00 (500 / 1000)\nSuccess! App '1148590' fully installed.\n",
+                 b""
+             ]), \
+             patch("os.close"):
+            res = run_app_download(
+                appid=1148590,
+                install_dir="/downloads/DOOM 64",
+                username="testuser",
+                log_cb=lambda l: logs.append(l),
+                progress_cb=lambda p: progresses.append(p),
+            )
+            self.assertTrue(res["success"])
+            self.assertTrue(any("fully installed" in l for l in logs))
+
+
     def test_save_current_session_preserves_metadata(self):
         import tempfile
         from pathlib import Path

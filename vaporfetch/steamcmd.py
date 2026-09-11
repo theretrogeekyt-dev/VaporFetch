@@ -1192,12 +1192,13 @@ def run_app_download(
     """
     session = get_current_session()
     active_user = username or session.get("username", "")
+    pwd = auth_session.pending_password if auth_session.username == active_user else None
 
     # Verify credentials exist before launching SteamCMD
-    if not session.get("logged_in") and not has_steamcmd_cached_credentials(active_user) and not auth_session.pending_password:
+    if not session.get("logged_in") and not has_steamcmd_cached_credentials(active_user) and not pwd:
         err = (
             f"Steam authentication not found for '{active_user}'. "
-            "Please click 'Login' and scan the QR code with your Steam Mobile App."
+            "Please click 'Login' to sign in with your Steam account."
         )
         if log_cb:
             log_cb(err)
@@ -1220,6 +1221,8 @@ def run_app_download(
         "+force_install_dir", safe_install_dir,
         "+login", active_user,
     ]
+    if pwd and not pwd.startswith("+") and not pwd.startswith("-") and " " not in pwd:
+        cmd.append(pwd)
 
     if platform and platform.lower() in ("windows", "linux", "macos"):
         cmd.extend(["+@sSteamCmdForcePlatformType", platform.lower()])
@@ -1233,92 +1236,180 @@ def run_app_download(
 
     if log_cb:
         log_cb(f"Starting SteamCMD for AppID {appid} (Platform: {platform})...")
-        log_cb(f"Command: {' '.join(cmd)}")
+        log_cmd = [arg if arg != pwd else "********" for arg in cmd]
+        log_cb(f"Command: {' '.join(log_cmd)}")
+
+    master_fd = None
+    slave_fd = None
+    proc = None
+    use_pty = hasattr(pty, "openpty")
 
     try:
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
+        if use_pty:
+            master_fd, slave_fd = pty.openpty()
+            proc = subprocess.Popen(
+                cmd,
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                close_fds=True,
+            )
+        else:
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=False,
+                bufsize=0,
+            )
+
+        last_bytes = 0
+        last_time = time.time()
+        success = False
+        error_message = ""
+        password_injected = False
+        accum = ""
+
+        while True:
+            if cancel_event and cancel_event.is_set():
+                if proc and proc.poll() is None:
+                    proc.terminate()
+                if log_cb:
+                    log_cb(f"Download for AppID {appid} cancelled by user.")
+                return {"success": False, "error": "Cancelled by user"}
+
+            if proc.poll() is not None:
+                if slave_fd is not None:
+                    try:
+                        os.close(slave_fd)
+                    except Exception:
+                        pass
+                    slave_fd = None
+
+                if use_pty:
+                    r, _, _ = select.select([master_fd], [], [], 0.3)
+                    if not r:
+                        break
+                elif hasattr(proc.stdout, "read"):
+                    try:
+                        rem = proc.stdout.read()
+                        if rem:
+                            accum += (rem.decode("utf-8", errors="replace") if isinstance(rem, bytes) else rem)
+                    except Exception:
+                        pass
+                    break
+                else:
+                    break
+
+            poll_fd = master_fd if use_pty else (proc.stdout.fileno() if hasattr(proc.stdout, "fileno") else None)
+            if poll_fd is not None:
+                r, _, _ = select.select([poll_fd], [], [], 0.3)
+                if not r:
+                    continue
+
+                try:
+                    raw_chunk = os.read(poll_fd, 4096)
+                    chunk = raw_chunk.decode("utf-8", errors="replace")
+                except OSError:
+                    if proc.poll() is None:
+                        time.sleep(0.1)
+                        continue
+                    break
+            else:
+                line = proc.stdout.readline() if hasattr(proc.stdout, "readline") else ""
+                chunk = line if isinstance(line, str) else line.decode("utf-8", errors="replace")
+
+            if not chunk:
+                if proc.poll() is None:
+                    time.sleep(0.1)
+                    continue
+                break
+
+            accum += chunk
+
+            # Check for interactive password prompt if not passed on CLI
+            if pwd and not password_injected and re.search(r"(?:^|[\r\n])[^\r\n]*?[Pp]assword:\s*$", accum):
+                password_injected = True
+                if log_cb:
+                    log_cb("Submitting password securely to SteamCMD prompt...")
+                try:
+                    if use_pty:
+                        os.write(master_fd, f"{pwd}\n".encode("utf-8"))
+                    elif hasattr(proc.stdin, "write"):
+                        proc.stdin.write(f"{pwd}\n".encode("utf-8") if isinstance(proc.stdin, io.BufferedWriter) else f"{pwd}\n")
+                        proc.stdin.flush()
+                except Exception as e:
+                    logger.error(f"Failed to pass password to SteamCMD stdin: {e}")
+
+            # Process all newline-terminated lines
+            while "\n" in accum:
+                line_str, accum = accum.split("\n", 1)
+                line_str = line_str.strip()
+                if not line_str:
+                    continue
+
+                if pwd and pwd in line_str:
+                    continue
+
+                if log_cb:
+                    log_cb(line_str)
+
+                # Check success/error
+                if RE_APP_SUCCESS.search(line_str):
+                    success = True
+
+                err_match = RE_APP_ERROR.search(line_str)
+                if err_match:
+                    error_message = err_match.group(2)
+                elif "ERROR (" in line_str or "FAILED (" in line_str:
+                    error_message = line_str
+
+                # Check progress
+                parsed_prog = parse_progress_line(line_str)
+                if parsed_prog and progress_cb:
+                    now = time.time()
+                    dt = now - last_time
+                    if dt > 0.5:
+                        bytes_diff = parsed_prog["current_bytes"] - last_bytes
+                        speed = max(0.0, bytes_diff / dt) if last_bytes > 0 else 0.0
+                        rem_bytes = max(0, parsed_prog["total_bytes"] - parsed_prog["current_bytes"])
+                        eta = int(rem_bytes / speed) if speed > 0 else 0
+
+                        parsed_prog["speed_bps"] = speed
+                        parsed_prog["eta_seconds"] = eta
+                        last_bytes = parsed_prog["current_bytes"]
+                        last_time = now
+                        progress_cb(parsed_prog)
+
+        retcode = proc.poll()
+        if retcode == 0 or success:
+            return {"success": True, "error": None}
+        else:
+            return {
+                "success": False,
+                "error": error_message or f"SteamCMD process exited with code {retcode}",
+            }
     except Exception as e:
-        err = f"Failed to start SteamCMD: {e}"
+        err = f"Failed during SteamCMD app download: {e}"
         if log_cb:
             log_cb(err)
         return {"success": False, "error": err}
-
-    last_bytes = 0
-    last_time = time.time()
-    success = False
-    error_message = ""
-    password_injected = False
-
-    while True:
-        if cancel_event and cancel_event.is_set():
-            proc.terminate()
-            if log_cb:
-                log_cb(f"Download for AppID {appid} cancelled by user.")
-            return {"success": False, "error": "Cancelled by user"}
-
-        line = proc.stdout.readline()
-        if not line and proc.poll() is not None:
-            break
-
-        line_str = line.strip()
-        if not line_str:
-            continue
-
-        if log_cb:
-            log_cb(line_str)
-
-        # Handle interactive password prompt during app download if prompted
-        if pwd and not password_injected and re.search(r"(?:^|\n|\r|[ ;:\.])[Pp]assword:\s*$", line_str):
-            password_injected = True
-            if log_cb:
-                log_cb("Entering password securely for SteamCMD download...")
+    finally:
+        if proc and proc.poll() is None:
             try:
-                proc.stdin.write(f"{pwd}\n")
-                proc.stdin.flush()
-            except Exception as e:
-                logger.error(f"Failed to pass password to SteamCMD stdin: {e}")
-            log_cb(line_str)
-
-        # Check success/error
-        if RE_APP_SUCCESS.search(line_str):
-            success = True
-
-        err_match = RE_APP_ERROR.search(line_str)
-        if err_match:
-            error_message = err_match.group(2)
-        elif "ERROR (" in line_str or "FAILED (" in line_str:
-            error_message = line_str
-
-        # Check progress
-        parsed_prog = parse_progress_line(line_str)
-        if parsed_prog and progress_cb:
-            now = time.time()
-            dt = now - last_time
-            if dt > 0.5:
-                bytes_diff = parsed_prog["current_bytes"] - last_bytes
-                speed = max(0.0, bytes_diff / dt) if last_bytes > 0 else 0.0
-                rem_bytes = max(0, parsed_prog["total_bytes"] - parsed_prog["current_bytes"])
-                eta = int(rem_bytes / speed) if speed > 0 else 0
-
-                parsed_prog["speed_bps"] = speed
-                parsed_prog["eta_seconds"] = eta
-                last_bytes = parsed_prog["current_bytes"]
-                last_time = now
-                progress_cb(parsed_prog)
-
-    retcode = proc.poll()
-    if retcode == 0 or success:
-        return {"success": True, "error": None}
-    else:
-        return {
-            "success": False,
-            "error": error_message or f"SteamCMD process exited with code {retcode}",
-        }
+                proc.terminate()
+                proc.wait(timeout=2)
+            except Exception:
+                pass
+        if slave_fd is not None:
+            try:
+                os.close(slave_fd)
+            except Exception:
+                pass
+        if master_fd is not None:
+            try:
+                os.close(master_fd)
+            except Exception:
+                pass
 

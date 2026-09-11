@@ -72,7 +72,8 @@ class TestDownloader(unittest.TestCase):
         mock_proc.stdout.readline.return_value = ""
         mock_proc.poll.return_value = 0
 
-        with patch("subprocess.Popen", return_value=mock_proc) as mock_popen:
+        with patch("subprocess.Popen", return_value=mock_proc) as mock_popen, \
+             patch("os.makedirs"):
             run_app_download(
                 appid=2280,
                 install_dir="/downloads/DOOM + DOOM II",
@@ -80,9 +81,11 @@ class TestDownloader(unittest.TestCase):
             )
             mock_popen.assert_called_once()
             called_cmd = mock_popen.call_args[0][0]
-            # Ensure install_dir argument had '+' replaced with '_'
-            self.assertIn("/downloads/DOOM _ DOOM II", called_cmd)
+            # Ensure install_dir argument had '+' replaced with '_' and is quoted for spaces
+            self.assertIn('"/downloads/DOOM _ DOOM II"', called_cmd)
             self.assertNotIn("/downloads/DOOM + DOOM II", called_cmd)
+            # Ensure password was NOT placed in CLI arguments
+            self.assertNotIn("dummy", called_cmd)
 
     def test_run_app_download_success_flow(self):
         from unittest.mock import patch, MagicMock
@@ -103,6 +106,7 @@ class TestDownloader(unittest.TestCase):
                  b"Update state (0x61) downloading, progress: 50.00 (500 / 1000)\nSuccess! App '1148590' fully installed.\n",
                  b""
              ]), \
+             patch("os.makedirs"), \
              patch("os.close"):
             res = run_app_download(
                 appid=1148590,

@@ -1215,14 +1215,23 @@ def run_app_download(
 
     # Ensure install_dir does not contain '+' which breaks SteamCMD CLI parameter parsing
     safe_install_dir = re.sub(r'\+', '_', install_dir)
+    try:
+        os.makedirs(safe_install_dir, exist_ok=True)
+    except Exception as e:
+        logger.warning(f"Could not pre-create directory {safe_install_dir}: {e}")
+
+    # Valve's SteamCMD CLI requires quoting paths that contain spaces
+    safe_dir_arg = f'"{safe_install_dir}"' if " " in safe_install_dir else safe_install_dir
     steamcmd_bin = find_steamcmd_path()
     cmd = [
         steamcmd_bin,
-        "+force_install_dir", safe_install_dir,
+        "+force_install_dir", safe_dir_arg,
         "+login", active_user,
     ]
-    if pwd and not pwd.startswith("+") and not pwd.startswith("-") and " " not in pwd:
-        cmd.append(pwd)
+    # Note: Do NOT append password to CLI args.
+    # Passing password on the command line bypasses cached credentials, forces 2FA challenges
+    # that immediately abort in batch mode (exit code 254), and leaks secrets in ps aux.
+    # If SteamCMD prompts for password at runtime, our interactive PTY handler injects it below.
 
     if platform and platform.lower() in ("windows", "linux", "macos"):
         cmd.extend(["+@sSteamCmdForcePlatformType", platform.lower()])
@@ -1236,8 +1245,7 @@ def run_app_download(
 
     if log_cb:
         log_cb(f"Starting SteamCMD for AppID {appid} (Platform: {platform})...")
-        log_cmd = [arg if arg != pwd else "********" for arg in cmd]
-        log_cb(f"Command: {' '.join(log_cmd)}")
+        log_cb(f"Command: {' '.join(cmd)}")
 
     master_fd = None
     slave_fd = None
@@ -1254,6 +1262,12 @@ def run_app_download(
                 stderr=slave_fd,
                 close_fds=True,
             )
+            # Close slave descriptor in parent process so child process is sole owner
+            try:
+                os.close(slave_fd)
+            except Exception:
+                pass
+            slave_fd = None
         else:
             proc = subprocess.Popen(
                 cmd,
@@ -1386,6 +1400,26 @@ def run_app_download(
         if retcode == 0 or success:
             return {"success": True, "error": None}
         else:
+            if not error_message:
+                # Check SteamCMD's redirected stderr.txt log for the underlying failure
+                stderr_candidates = [
+                    Path(os.environ.get("HOME", "/data/steam")) / ".steam" / "steam" / "logs" / "stderr.txt",
+                    Path(DATA_DIR) / "steam" / ".steam" / "steam" / "logs" / "stderr.txt",
+                    Path("/data/steam/.steam/steam/logs/stderr.txt"),
+                ]
+                for sc in stderr_candidates:
+                    if sc.exists():
+                        try:
+                            with open(sc, "r", encoding="utf-8", errors="replace") as f:
+                                tail = [l.strip() for l in f.readlines() if l.strip()]
+                                if tail:
+                                    err_text = tail[-1]
+                                    if log_cb:
+                                        log_cb(f"SteamCMD stderr: {err_text}")
+                                    error_message = f"SteamCMD error: {err_text} (exit code {retcode})"
+                                    break
+                        except Exception:
+                            pass
             return {
                 "success": False,
                 "error": error_message or f"SteamCMD process exited with code {retcode}",

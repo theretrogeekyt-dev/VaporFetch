@@ -437,11 +437,16 @@ document.addEventListener("DOMContentLoaded", () => {
           stopPushPolling();
           showDirectStep("credentials");
           showLoginError(data.error || "Steam confirmation failed or timed out.");
-        } else if (data.status === "awaiting_2fa" && data.two_factor_type !== "mobile_push") {
-          stopPushPolling();
-          showDirectStep("code");
-          if (elements.codePromptText) elements.codePromptText.textContent = data.prompt || "Enter the Steam Guard code sent to your email:";
-          elements.twoFactorCodeInput?.focus();
+        } else if (data.status === "awaiting_2fa") {
+          if (data.prompt && elements.pushStatusText) {
+            elements.pushStatusText.textContent = data.prompt;
+          }
+          if (data.two_factor_type !== "mobile_push") {
+            stopPushPolling();
+            showDirectStep("code");
+            if (elements.codePromptText) elements.codePromptText.textContent = data.prompt || "Enter the Steam Guard code sent to your email:";
+            elements.twoFactorCodeInput?.focus();
+          }
         }
       } catch (e) {
         // Ignore transient poll errors

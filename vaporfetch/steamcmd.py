@@ -33,13 +33,17 @@ RE_MOBILE_PUSH = re.compile(
     r"(confirm the login in the Steam Mobile app|Waiting for confirmation\.\.\.(?!OK))",
     re.IGNORECASE
 )
+RE_MOBILE_CONFIRMED = re.compile(
+    r"(Waiting for confirmation\.\.\.OK|Waiting for client config)",
+    re.IGNORECASE
+)
 RE_STEAM_GUARD = re.compile(
     r"(Steam Guard code:|Steam Guard Mobile Authenticator|Two-factor code:|Account Logon Denied|Need Two Factor|result code 65|result code 85)",
     re.IGNORECASE
 )
 RE_LOGIN_SUCCESS = re.compile(
-    r"(Logged in OK|Waiting for user info\.\.\..*?OK|Waiting for confirmation\.\.\.OK|Waiting for client config\.\.\.OK|Success\.|(?:^|[\r\n])\s*Steam>)",
-    re.IGNORECASE | re.DOTALL
+    r"(Logged in OK|Waiting for user info\.\.\..*?OK|Success\.|Steam>)",
+    re.IGNORECASE
 )
 RE_LOGIN_FAIL = re.compile(
     r"(?:FAILED|ERROR)\s*\((.*?)\)|(?:FAILED|ERROR) with result code\s+([0-9]+)|(?:FAILED|ERROR)\s*:\s*(.*)",
@@ -53,7 +57,7 @@ def check_login_output(text: str) -> Optional[Dict[str, Any]]:
     """
     events = []
 
-    # 1. Success check
+    # 1. Success check (only when SteamCMD reaches post-logon completion or Steam> prompt)
     for m in RE_LOGIN_SUCCESS.finditer(text):
         events.append((m.end(), "logged_in", {"status": "logged_in"}))
 
@@ -62,6 +66,14 @@ def check_login_output(text: str) -> Optional[Dict[str, Any]]:
         events.append((m.end(), "awaiting_2fa", {
             "status": "awaiting_2fa",
             "prompt": "Please confirm the login in the Steam Mobile app on your phone.",
+            "two_factor_type": "mobile_push",
+        }))
+
+    # 2b. Mobile Push Confirmed on phone (Steam session finalizing)
+    for m in RE_MOBILE_CONFIRMED.finditer(text):
+        events.append((m.end(), "awaiting_2fa", {
+            "status": "awaiting_2fa",
+            "prompt": "Mobile approval confirmed! Finalizing Steam sign-in...",
             "two_factor_type": "mobile_push",
         }))
 
@@ -581,14 +593,37 @@ def _monitor_login_pty():
         auth_session.license_event.clear()
         log_steamcmd(f"Steam authentication confirmed for '{auth_session.username}'. Logged in successfully.")
 
-        try:
-            log_steamcmd("Requesting owned licenses from SteamCMD...")
+        # Ensure SteamCMD has fully finalized logon and reached the interactive prompt
+        ready_start = time.time()
+        while time.time() - ready_start < 20.0:
+            if "Steam>" in accum_str:
+                break
+            if auth_session.process and auth_session.process.poll() is not None:
+                break
+            r, _, _ = select.select([master_fd], [], [], 0.3)
+            if not r:
+                continue
             try:
-                os.write(master_fd, b"licenses_print\n")
+                ch = os.read(master_fd, 4096).decode("utf-8", errors="replace")
+            except OSError:
+                break
+            if not ch:
+                break
+            accum_str += ch
+            for line in ch.splitlines():
+                if line.strip():
+                    log_steamcmd(line.strip())
+            if "Steam>" in accum_str:
+                break
+
+        try:
+            log_steamcmd("Requesting owned licenses from SteamCMD (licenses_print)...")
+            try:
+                os.write(master_fd, b"\nlicenses_print\n")
                 read_start = time.time()
                 got_licenses = False
                 last_recv_time = time.time()
-                while time.time() - read_start < 25.0:
+                while time.time() - read_start < 35.0:
                     if auth_session.process and auth_session.process.poll() is not None:
                         try:
                             r, _, _ = select.select([master_fd], [], [], 0.3)

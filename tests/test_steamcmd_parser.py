@@ -169,6 +169,19 @@ class TestSteamCMDParser(unittest.TestCase):
         self.assertIsNotNone(r12)
         self.assertEqual(r12["status"], "logged_in")
 
+        # Mobile push confirmed on phone, but post-logon still in progress
+        push_confirming = (
+            "Please confirm the login in the Steam Mobile app on your phone.\n\n"
+            "Waiting for confirmation...OK\n"
+            "Waiting for client config..."
+        )
+        r13 = check_login_output(push_confirming)
+        self.assertIsNotNone(r13)
+        self.assertEqual(r13["status"], "awaiting_2fa")
+        self.assertEqual(r13["two_factor_type"], "mobile_push")
+        self.assertIn("Finalizing", r13.get("prompt", ""))
+
+
     def test_app_success_and_error(self):
         succ = "Success! App '730' fully installed."
         err = "ERROR! Failed to install app '730' (No subscription)"

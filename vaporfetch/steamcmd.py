@@ -1,6 +1,7 @@
 import os
 import re
 import pty
+import shutil
 import select
 import subprocess
 import threading
@@ -902,6 +903,102 @@ def parse_licenses_output(output: str) -> Set[int]:
     return app_ids
 
 
+def _run_steamcmd_capture(cmd: List[str], pwd: Optional[str] = None, timeout: float = 60.0) -> str:
+    """
+    Run SteamCMD and capture output using a PTY when available so that SteamCMD
+    has an interactive terminal environment and does not terminate prematurely upon
+    detecting EOF on stdin during startup. Falls back to subprocess.run if PTY fails or
+    during unit test mocking.
+    """
+    target = cmd[0] if cmd else ""
+    if not shutil.which(target) and not os.path.exists(target):
+        res = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        return res.stdout or ""
+
+    try:
+        master_fd, slave_fd = pty.openpty()
+        proc = subprocess.Popen(
+            cmd,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            close_fds=True,
+        )
+        os.close(slave_fd)
+
+        out = ""
+        read_start = time.time()
+        password_sent = False
+
+        while time.time() - read_start < timeout:
+            if proc.poll() is not None:
+                try:
+                    r, _, _ = select.select([master_fd], [], [], 0.3)
+                    if r:
+                        ch = os.read(master_fd, 4096).decode("utf-8", errors="replace")
+                        if ch:
+                            out += ch
+                            for line in ch.splitlines():
+                                if line.strip():
+                                    log_steamcmd(line.strip())
+                except Exception:
+                    pass
+                break
+
+            r, _, _ = select.select([master_fd], [], [], 0.4)
+            if not r:
+                continue
+            try:
+                ch = os.read(master_fd, 4096).decode("utf-8", errors="replace")
+            except OSError:
+                break
+            if not ch:
+                break
+            out += ch
+            for line in ch.splitlines():
+                if line.strip():
+                    log_steamcmd(line.strip())
+
+            # If SteamCMD prompts for password interactively and it was not passed on CLI:
+            if pwd and not password_sent and re.search(r"(?:^|[\r\n])[^\r\n]*?[Pp]assword:\s*", out):
+                password_sent = True
+                try:
+                    os.write(master_fd, f"{pwd}\n".encode("utf-8"))
+                except Exception:
+                    pass
+
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                proc.wait(timeout=2)
+        except Exception:
+            pass
+        try:
+            os.close(master_fd)
+        except Exception:
+            pass
+
+        return out
+    except Exception as e:
+        logger.debug(f"PTY execution fallback to subprocess.run: {e}")
+        res = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        return res.stdout or ""
+
+
 def fetch_licenses(username: str) -> Set[int]:
     """Run `licenses_print` in SteamCMD to obtain owned game AppIDs."""
     if auth_session.process and auth_session.process.poll() is None:
@@ -935,16 +1032,7 @@ def fetch_licenses(username: str) -> Set[int]:
     log_steamcmd(f"Querying SteamCMD licenses for user '{username}'...")
 
     try:
-        res = subprocess.run(
-            cmd,
-            input=f"{pwd}\n" if pwd else None,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-        out = res.stdout or ""
+        out = _run_steamcmd_capture(cmd, pwd=pwd, timeout=60.0)
         for line in out.splitlines():
             if line.strip():
                 log_steamcmd(line.strip())

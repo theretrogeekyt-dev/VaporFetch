@@ -49,6 +49,7 @@ class AppResolver:
     """Resolves Steam AppIDs to game titles using local cache and Steam Web API."""
     def __init__(self):
         self.app_map: Dict[int, str] = dict(COMMON_STEAM_APPS)
+        self._has_attempted_update = False
         self._load_cache()
 
     def _load_cache(self) -> None:
@@ -69,26 +70,53 @@ class AppResolver:
             print(f"[VaporFetch] Warning: Failed to save app cache: {e}")
 
     def update_from_steam_api(self) -> bool:
-        """Download complete Steam AppID master list."""
-        url = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
+        """Download Steam AppID master list if available."""
+        if self._has_attempted_update:
+            return False
+        self._has_attempted_update = True
+
+        settings = load_settings()
+        api_key = settings.get("steam_api_key") or settings.get("api_key") or os.environ.get("STEAM_API_KEY", "")
+
+        # 1. Try IStoreService if an API key is configured
+        if api_key:
+            try:
+                url = f"https://api.steampowered.com/IStoreService/GetAppList/v1/?key={api_key}&max_results=50000"
+                req = urllib.request.Request(url, headers={"User-Agent": "VaporFetch/1.0"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    payload = json.loads(resp.read().decode("utf-8"))
+                    apps = payload.get("response", {}).get("apps", [])
+                    for item in apps:
+                        aid = item.get("appid")
+                        name = item.get("name", "").strip()
+                        if aid and name:
+                            self.app_map[int(aid)] = name
+                    if apps:
+                        self.save_cache()
+                        return True
+            except Exception:
+                pass
+
+        # 2. Try legacy public endpoint if available
         try:
-            req = urllib.request.Request(
-                url,
-                headers={"User-Agent": "VaporFetch/1.0 (Steam Game Downloader)"}
-            )
-            with urllib.request.urlopen(req, timeout=15) as response:
-                payload = json.loads(response.read().decode("utf-8"))
+            url = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
+            req = urllib.request.Request(url, headers={"User-Agent": "VaporFetch/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
                 apps = payload.get("applist", {}).get("apps", [])
                 for item in apps:
                     aid = item.get("appid")
                     name = item.get("name", "").strip()
                     if aid and name:
                         self.app_map[int(aid)] = name
-                self.save_cache()
-                return True
-        except Exception as e:
-            print(f"[VaporFetch] Notice: Could not update app list from Steam API: {e}")
-            return False
+                if apps:
+                    self.save_cache()
+                    return True
+        except Exception:
+            # Endpoint deprecated by Valve; titles fall back seamlessly to per-app store API lookup
+            pass
+
+        return False
 
     def resolve_name(self, appid: int) -> str:
         """Get the title for an AppID, querying store API if missing."""

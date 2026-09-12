@@ -21,10 +21,11 @@ from vaporfetch.steamcmd import (
 )
 
 class DownloadTask:
-    def __init__(self, appid: int, name: str, platform: str = "windows"):
+    def __init__(self, appid: int, name: str, platform: str = "windows", username: Optional[str] = None):
         self.appid: int = appid
         self.name: str = name
         self.platform: str = platform
+        self.username: Optional[str] = username
         self.status: str = "queued"  # queued, downloading, completed, failed, cancelled
         self.percent: float = 0.0
         self.current_bytes: int = 0
@@ -41,6 +42,7 @@ class DownloadTask:
             "appid": self.appid,
             "name": self.name,
             "platform": self.platform,
+            "username": self.username,
             "status": self.status,
             "percent": round(self.percent, 1),
             "current_bytes": self.current_bytes,
@@ -114,8 +116,10 @@ class DownloadManager:
                 name = resolver.resolve_name(appid)
 
             settings = load_settings()
+            session = get_current_session()
+            task_user = session.get("username")
             target_platform = platform or settings.get("default_platform", "windows")
-            task = DownloadTask(appid=appid, name=name, platform=target_platform)
+            task = DownloadTask(appid=appid, name=name, platform=target_platform, username=task_user)
             self.queue.append(task)
 
         self.add_log(f"Queued '{name}' (AppID: {appid}, Platform: {task.platform})")
@@ -126,6 +130,8 @@ class DownloadManager:
         """Add multiple apps to the queue. Returns count of newly queued games."""
         added = 0
         settings = load_settings()
+        session = get_current_session()
+        task_user = session.get("username")
         target_platform = platform or settings.get("default_platform", "windows")
 
         with self.lock:
@@ -140,7 +146,7 @@ class DownloadManager:
                     continue
 
                 name = item.get("name") or resolver.resolve_name(aid)
-                task = DownloadTask(appid=aid, name=name, platform=target_platform)
+                task = DownloadTask(appid=aid, name=name, platform=target_platform, username=task_user)
                 self.queue.append(task)
                 added += 1
 
@@ -216,8 +222,7 @@ class DownloadManager:
                 self.broadcast("queue_update", self.get_queue_state())
                 continue
 
-            session = get_current_session()
-            auth_user = task.username or session.get("username", "")
+            auth_user = getattr(task, "username", None) or username
             has_cached = has_steamcmd_cached_credentials(auth_user)
             has_pwd = bool(auth_session.pending_password and auth_session.username == auth_user)
 

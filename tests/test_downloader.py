@@ -10,6 +10,13 @@ class TestDownloader(unittest.TestCase):
         self.assertEqual(d["platform"], "windows")
         self.assertEqual(d["status"], "queued")
         self.assertEqual(d["percent"], 0.0)
+        self.assertIsNone(task.username)
+
+    def test_download_task_with_username(self):
+        task = DownloadTask(appid=730, name="Counter-Strike 2", platform="windows", username="reaper360vr")
+        d = task.to_dict()
+        self.assertEqual(d["username"], "reaper360vr")
+        self.assertEqual(task.username, "reaper360vr")
 
     def test_queue_operations(self):
         mgr = DownloadManager()

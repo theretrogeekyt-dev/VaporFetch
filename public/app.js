@@ -333,6 +333,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const syncBatchInput = document.getElementById('sync-batch-input');
   const syncCmdUsername = document.getElementById('sync-cmd-username');
   const syncCmdPassword = document.getElementById('sync-cmd-password');
+  const syncCmdGuard = document.getElementById('sync-cmd-guard');
   const detectedAccountsContainer = document.getElementById('detected-accounts-container');
   let activeSyncTab = 'sync-box-web';
 
@@ -370,6 +371,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await res.json();
       if (data.success && data.accounts && data.accounts.length > 0) {
         const acc = data.accounts[0];
+        const isGeneric = acc.username.startsWith('Account (');
+        const displayLabel = !isGeneric ? `${acc.personaName || acc.username} (${acc.username})` : (acc.personaName !== acc.username ? `${acc.personaName} (${acc.username})` : `SteamID: ${acc.steamId64}`);
         detectedAccountsContainer.innerHTML = `
           <div class="detected-account-card">
             <div class="detected-account-info">
@@ -377,7 +380,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
                 Detected Steam Account on NAS
               </span>
-              <span class="detected-account-desc"><strong>${acc.personaName || acc.username}</strong> (${acc.username}) &bull; SteamID64: <code>${acc.steamId64}</code></span>
+              <span class="detected-account-desc"><strong>${displayLabel}</strong> &bull; SteamID64: <code>${acc.steamId64}</code></span>
             </div>
             <button type="button" class="btn-secondary btn-sm" id="btn-autofill-account">Use Account</button>
           </div>
@@ -388,7 +391,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (autofillBtn) {
           autofillBtn.addEventListener('click', () => {
             syncIdentifier.value = acc.steamId64;
-            syncCmdUsername.value = acc.username;
+            if (!isGeneric) {
+              syncCmdUsername.value = acc.username;
+            }
             // Switch to web sync tab if not already
             const webTabBtn = document.querySelector('.sync-tab-btn[data-tab-target="sync-box-web"]');
             if (webTabBtn) webTabBtn.click();
@@ -460,7 +465,8 @@ document.addEventListener('DOMContentLoaded', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             username,
-            password: syncCmdPassword.value
+            password: syncCmdPassword.value,
+            steamGuardCode: (syncCmdGuard?.value || '').trim()
           })
         });
 
@@ -470,7 +476,10 @@ document.addEventListener('DOMContentLoaded', () => {
           alert(`SteamCMD Sync complete! Found ${data.totalImported} game licenses owned by ${username} (${data.newlyAdded} newly added).`);
           fetchLibrary();
         } else {
-          alert(`SteamCMD Sync failed:\n${data.error}`);
+          alert(`SteamCMD Sync failed:\n\n${data.error}`);
+          if (data.error && data.error.includes('Steam Guard 2FA')) {
+            if (syncCmdGuard) syncCmdGuard.focus();
+          }
         }
       } else {
         // Method 4: Steam Web API / Profile Sync

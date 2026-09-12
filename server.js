@@ -212,8 +212,8 @@ app.post('/api/library/sync', async (req, res) => {
 // Library: Sync Steam licenses directly via SteamCMD account session
 app.post('/api/library/sync-steamcmd', async (req, res) => {
   try {
-    const { username, password } = req.body;
-    const result = await libraryManager.syncViaSteamCmd(username, password);
+    const { username, password, steamGuardCode } = req.body;
+    const result = await libraryManager.syncViaSteamCmd(username, password, steamGuardCode);
     res.json(result);
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });

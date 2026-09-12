@@ -415,9 +415,13 @@
               <input type="text" id="sync-cmd-username" placeholder="e.g. reaper360vr" class="form-input">
             </div>
             <div class="form-group">
-              <label for="sync-cmd-password" class="input-label">Steam Password <span class="badge-hint">Optional if already cached</span></label>
-              <input type="password" id="sync-cmd-password" placeholder="Leave empty if logged in previously" class="form-input">
-              <small class="field-hint">If your account requires 2FA and hasn't logged in yet, start a game download once in the Direct Download tab to cache your 2FA session token.</small>
+              <label for="sync-cmd-password" class="input-label">Steam Password <span class="badge-hint">Required for login</span></label>
+              <input type="password" id="sync-cmd-password" placeholder="Steam account password" class="form-input">
+            </div>
+            <div class="form-group">
+              <label for="sync-cmd-guard" class="input-label">Steam Guard 2FA Code <span class="badge-hint">Mobile Authenticator or Email</span></label>
+              <input type="text" id="sync-cmd-guard" placeholder="e.g. 5 letters/digits" class="form-input" maxlength="10">
+              <small class="field-hint">If your Steam account has Steam Guard enabled, enter your 5-digit code from your Steam App or Email.</small>
             </div>
           </div>
 

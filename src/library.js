@@ -236,10 +236,26 @@ class LibraryManager {
               try {
                 const accountId32 = BigInt(d.name);
                 const steamId64 = (accountId32 + 76561197960265728n).toString();
+                let username = `Account (${d.name})`;
+                let personaName = `Account (${d.name})`;
+
+                // Try to read PersonaName or AccountName from localconfig.vdf
+                const localConfigPath = path.join(udir, d.name, 'config', 'localconfig.vdf');
+                if (fs.existsSync(localConfigPath)) {
+                  try {
+                    const lcTxt = fs.readFileSync(localConfigPath, 'utf8');
+                    const pm = lcTxt.match(/"PersonaName"\s*"([^"]+)"/i);
+                    const am = lcTxt.match(/"AccountName"\s*"([^"]+)"/i);
+                    if (pm) personaName = pm[1];
+                    if (am) username = am[1];
+                    else if (pm) username = pm[1];
+                  } catch (e) {}
+                }
+
                 if (!detected.some(acc => acc.steamId64 === steamId64)) {
                   detected.push({
-                    username: `Account (${d.name})`,
-                    personaName: `Account (${d.name})`,
+                    username,
+                    personaName,
                     steamId64: steamId64,
                     source: 'Steam userdata'
                   });
@@ -536,17 +552,21 @@ class LibraryManager {
    * Directly authenticates with Valve's Steam servers—bypasses profile privacy and API key requirements!
    * @param {string} username
    * @param {string} [password]
+   * @param {string} [steamGuardCode]
    */
-  async syncViaSteamCmd(username, password) {
+  async syncViaSteamCmd(username, password, steamGuardCode) {
     const user = (username || process.env.STEAM_USERNAME || '').trim();
     if (!user) {
       throw new Error('Steam username is required for SteamCMD license sync.');
     }
 
     const pass = password || process.env.STEAM_PASSWORD || '';
+    const guard = (steamGuardCode || '').trim();
     const args = [];
 
-    if (pass) {
+    if (pass && guard) {
+      args.push('+login', user, pass, guard);
+    } else if (pass) {
       args.push('+login', user, pass);
     } else {
       args.push('+login', user);
@@ -563,7 +583,8 @@ class LibraryManager {
           ...process.env,
           HOME: this.configDir,
           LC_ALL: 'C'
-        }
+        },
+        stdio: ['pipe', 'pipe', 'pipe']
       });
 
       // 45s timeout for SteamCMD command
@@ -581,28 +602,33 @@ class LibraryManager {
         procExited = true;
         clearTimeout(timer);
 
-        if (/Steam Guard code:/i.test(output) || /Two-factor code:/i.test(output)) {
-          return reject(new Error('Steam Guard 2FA is required. Start a game download once (e.g. DOOM II) with your credentials in the Direct Download tab to complete 2FA verification. Once logged in, your session token is saved on the NAS and you can sync anytime!'));
+        // 1. Detect 2FA Steam Guard Required (Codes 63, 65, or explicit prompts)
+        if (/result code 63/i.test(output) || /NeedTwoFactorCode/i.test(output) || /result code 65/i.test(output) || /Steam Guard code/i.test(output) || /Two-factor code/i.test(output) || /Account Logon Denied/i.test(output)) {
+          return reject(new Error('Steam Guard 2FA is required! Please enter the 5-character code from your Steam Mobile Authenticator app or Email in the "Steam Guard Code" field below and click "Sync via SteamCMD".'));
         }
 
-        if (/Invalid Password/i.test(output) || /Login Failure/i.test(output)) {
-          return reject(new Error('Steam login failure: Invalid username or password. Please verify your login credentials.'));
+        // 2. Detect 2FA Code Mismatch (Code 87)
+        if (/result code 87/i.test(output) || /TwoFactorCodeMismatch/i.test(output)) {
+          return reject(new Error('Invalid Steam Guard 2FA code. Please check the code in your Steam Mobile App or Email and try again.'));
         }
 
-        if (/Rate Limit Exceeded/i.test(output)) {
-          return reject(new Error('Steam rate limit exceeded. Please wait a few minutes before trying again.'));
+        // 3. Detect Invalid Credentials (Code 5)
+        if (/result code 5/i.test(output) || /Invalid Password/i.test(output) || /Login Failure/i.test(output)) {
+          return reject(new Error('Steam login failure: Invalid username or password. Please verify your credentials.'));
+        }
+
+        // 4. Detect Rate Limiting (Code 84)
+        if (/result code 84/i.test(output) || /Rate Limit Exceeded/i.test(output)) {
+          return reject(new Error('Steam rate limit reached. Valve is temporarily throttling requests. Please wait 2-3 minutes before retrying.'));
         }
 
         // Parse AppIDs and optional titles from licenses_print output
-        // Formats:
-        //  - AppID 2280 : "DOOM + DOOM II"
-        //  - AppID 730
         const foundApps = new Map();
-        const regexDetailed = /-\s*AppID\s*(\d+)\s*:\s*"([^"]+)"/gi;
+        const regexDetailed = /-\s*AppID\s*(\d+)\s*:\s*"?([^"\r\n]+)"?/gi;
         let match;
         while ((match = regexDetailed.exec(output)) !== null) {
           const id = match[1];
-          const name = match[2].trim();
+          const name = match[2].trim().replace(/^_+|_+$/g, '');
           if (parseInt(id, 10) > 10) {
             foundApps.set(id, name);
           }
@@ -617,7 +643,14 @@ class LibraryManager {
         }
 
         if (foundApps.size === 0) {
-          return reject(new Error('No licenses found in SteamCMD output. If SteamCMD did not finish logging in, try downloading a game first to establish the authenticated session.'));
+          const cleanSnippet = (output || '')
+            .replace(new RegExp(pass || '_____', 'g'), '***')
+            .split('\n')
+            .map(l => l.trim())
+            .filter(l => l && !l.includes('Redirecting stderr'))
+            .slice(-3)
+            .join(' | ');
+          return reject(new Error(`No licenses found. SteamCMD status: "${cleanSnippet || 'Process exited without output'}". Enter your 5-digit Steam Guard code or check credentials.`));
         }
 
         let addedCount = 0;

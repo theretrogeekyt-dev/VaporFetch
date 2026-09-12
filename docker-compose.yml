@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  vaporfetch:
+    image: vaporfetch:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vaporfetch
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # User and Group permissions for writing to NAS shares (SMB / CIFS / NFS)
+      # Synology DSM default: PUID=1026, PGID=100
+      # Unraid default:       PUID=99,   PGID=100
+      # Standard Linux:       PUID=1000, PGID=1000 (run `id $USER` to check your host)
+      - PUID=1000
+      - PGID=1000
+      - UMASK=002
+
+      # Internal Web UI Port
+      - PORT=8080
+
+      # Optional: Default Steam account credentials for games requiring ownership
+      # Can also be entered dynamically per-download in the Web UI
+      - STEAM_USERNAME=
+      - STEAM_PASSWORD=
+
+    volumes:
+      # ====================================================================
+      # 1. NAS Storage Mount for Game Downloads
+      # Replace the host path with your mounted NAS share (e.g. SMB/NFS/local)
+      # ====================================================================
+      - /mnt/nas/games:/downloads
+      # Or local path for testing:
+      # - ./downloads:/downloads
+
+      # ====================================================================
+      # 2. Persistent Configuration & Steam Guard Session Cache
+      # Keeps Steam login session tokens, Steam Guard keys, and history
+      # ====================================================================
+      - ./config:/config
+
+# ========================================================================
+# OPTIONAL: Direct Docker NFS / CIFS Share Mounts (Alternative to Host Mount)
+# Uncomment the block below and replace volume in services if mounting directly
+# ========================================================================
+# volumes:
+#   nas_games:
+#     driver: local
+#     driver_opts:
+#       type: cifs
+#       o: "username=nasuser,password=naspass,uid=1000,gid=1000,iocharset=utf8"
+#       device: "//192.168.1.100/games"
+

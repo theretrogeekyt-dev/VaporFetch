@@ -1,0 +1,24 @@
+{
+  "name": "vaporfetch",
+  "version": "1.0.0",
+  "description": "Dockerized SteamCMD game download utility with lightweight Web UI for NAS storage",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/test_downloader.js"
+  },
+  "keywords": [
+    "steam",
+    "steamcmd",
+    "nas",
+    "docker",
+    "downloader",
+    "game-server"
+  ],
+  "author": "VaporFetch Contributors",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
+

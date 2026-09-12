@@ -21,6 +21,7 @@ from vaporfetch.config import (
     get_storage_stats,
     DATA_DIR,
     DOWNLOADS_DIR,
+    VERSION,
 )
 from vaporfetch.steamcmd import (
     get_current_session,
@@ -104,6 +105,7 @@ if FastAPI is not None:
         username = session.get("username", "")
         session["has_steamcmd_auth"] = bool(session.get("logged_in") and username)
         return {
+            "version": VERSION,
             "session": session,
             "auth_state": {
                 "status": "logged_in" if session.get("logged_in") else "idle",
@@ -162,20 +164,34 @@ if FastAPI is not None:
     @app.get("/api/library")
     async def get_library_endpoint(refresh: bool = False):
         games, error = get_library_with_status(force_refresh=refresh)
-        return {
-            "count": len(games),
-            "games": games,
-            "error": error,
-        }
+        return JSONResponse(
+            content={
+                "count": len(games),
+                "games": games,
+                "error": error,
+            },
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
     @app.post("/api/library/refresh")
     async def refresh_library_endpoint():
         games, error = get_library_with_status(force_refresh=True)
-        return {
-            "count": len(games),
-            "games": games,
-            "error": error,
-        }
+        return JSONResponse(
+            content={
+                "count": len(games),
+                "games": games,
+                "error": error,
+            },
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
     @app.get("/api/queue")
     async def get_queue_endpoint():

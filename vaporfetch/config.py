@@ -4,6 +4,8 @@ import shutil
 from pathlib import Path
 from typing import Dict, Any
 
+VERSION = "1.2.0"
+
 # Base directories
 def is_in_docker() -> bool:
     """Check if the current process is running inside a Docker container."""

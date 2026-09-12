@@ -119,6 +119,7 @@ document.addEventListener("DOMContentLoaded", () => {
     libraryErrorBanner: document.getElementById("libraryErrorBanner"),
     libraryErrorText: document.getElementById("libraryErrorText"),
     viewLogsBtn: document.getElementById("viewLogsBtn"),
+    versionBadge: document.querySelector(".version-badge"),
   };
 
   // --- Initialize App ---
@@ -151,6 +152,10 @@ document.addEventListener("DOMContentLoaded", () => {
       const res = await fetch("/api/status");
       if (!res.ok) return;
       const data = await res.json();
+
+      if (data.version && elements.versionBadge) {
+        elements.versionBadge.textContent = data.version.startsWith("v") ? data.version : `v${data.version}`;
+      }
 
       updateStorageUI(data.storage);
       updateUserSession(data.session);
@@ -694,18 +699,214 @@ document.addEventListener("DOMContentLoaded", () => {
     elements.libraryErrorBanner.style.display = "none";
   }
 
+  // --- Client-Side Non-Game Filter (Strict Games Only) ---
+  const CLIENT_ALLOWED_GAMES = new Set([4000, 362890]); // Garry's Mod, Black Mesa
+
+  const CLIENT_KNOWN_NON_GAMES = new Set([
+    4, 5, 7, 8, 9, 90, 97, 105, 115, 205, 215, 218, 225, 245, 255, 513, 563, 564, 575, 576, 629, 644, 746,
+    1840, 17500, 17510, 17520, 17530, 17550, 17570, 17730, 72850, 202690, 217370, 218350, 220700, 221380,
+    223710, 223850, 227260, 228980, 235780, 235900, 243750, 244630, 250820, 258380, 280740, 286010, 286080,
+    290930, 317400, 323910, 356530, 362870, 363890, 365300, 365670, 367670, 382110, 383730, 388080, 397460,
+    400040, 404790, 431730, 431960, 484580, 524390, 587650, 601360, 629520, 679270, 714070, 858210, 896660,
+    908520, 961940, 976620, 993090, 1009850, 1014940, 1054830, 1070560, 1079260, 1096900, 1113280, 1118310,
+    1173510, 1192380, 1245040, 1391110, 1420170, 1467450, 1493710, 1494460, 1580130, 1583720, 1628350,
+    1807930, 1887720, 1905180, 2180100, 2230260, 2348520, 2805730
+  ]);
+
+  function isClientNonGame(game) {
+    if (!game) return true;
+    if (game.is_tool) return true;
+    const appid = Number(game.appid);
+    if (CLIENT_ALLOWED_GAMES.has(appid)) return false;
+    if (CLIENT_KNOWN_NON_GAMES.has(appid)) return true;
+
+    const clean = (game.name || "").trim();
+    if (!clean) return true;
+    if (clean.startsWith("Steam App ") || clean.startsWith("SteamDB Unknown App")) return true;
+    if (/^App\s*#?\d+$/i.test(clean) || /^app_\d+$/i.test(clean)) return true;
+
+    const lower = clean.toLowerCase();
+
+    // Internal Valve / Proton / Steamworks
+    if (
+      lower === "winui2" ||
+      lower === "steam client" ||
+      lower === "spacewar" ||
+      lower.startsWith("steam client") ||
+      lower.startsWith("steam linux runtime") ||
+      lower.startsWith("proton ") ||
+      lower === "proton" ||
+      lower.startsWith("steamworks ") ||
+      lower.startsWith("source sdk") ||
+      lower.startsWith("steamvr") ||
+      lower.startsWith("unreleased ") ||
+      lower.startsWith("valve internal ") ||
+      lower.startsWith("steam test ") ||
+      lower.startsWith("test app ")
+    ) {
+      return true;
+    }
+
+    // DLC detection
+    const dlcRegex = /\b(dlc|expansion pack|expansion pass|season pass|annual pass|battle pass|soundtrack|artbook|art book|digital artbook|digital art book|bonus content|skin pack|character pack|costume pack|item pack|weapon pack|content pack|asset pack|upgrade pack|map pack|voice pack|audio pack|music pack|supporter pack|founder pack|founders pack|pre-order bonus|pre-purchase bonus)\b/i;
+    if (dlcRegex.test(lower)) return true;
+    if (
+      lower.endsWith(" dlc") ||
+      lower.endsWith(" (dlc)") ||
+      lower.endsWith(" - dlc") ||
+      lower.includes("dlc: ") ||
+      lower.includes(": dlc") ||
+      lower.includes(" dlc -") ||
+      lower.includes("deluxe upgrade") ||
+      lower.includes("founder upgrade") ||
+      lower.includes("supporter upgrade") ||
+      lower.includes("deluxe edition content") ||
+      lower.includes("add-on support") ||
+      lower.includes("addon support") ||
+      lower.endsWith(" add-on") ||
+      lower.endsWith(" addon") ||
+      lower.endsWith(" (add-on)") ||
+      lower.endsWith(" (addon)")
+    ) {
+      return true;
+    }
+
+    // Mod detection
+    if (
+      lower.endsWith(" mod") ||
+      lower.endsWith(" mods") ||
+      lower.endsWith(" (mod)") ||
+      lower.endsWith(" - mod") ||
+      lower.includes(": mod") ||
+      lower.includes(" mod: ") ||
+      lower.includes(" mod - ") ||
+      lower.includes("- mod - ") ||
+      lower.includes("source mod") ||
+      lower.includes("community mod") ||
+      lower.includes("workshop mod") ||
+      lower.includes("modification")
+    ) {
+      return true;
+    }
+
+    // Software detection
+    const softwareRegex = /\b(software|utility|utilities|benchmark|filmmaker|level editor|map editor|world editor|scenario editor)\b/i;
+    if (softwareRegex.test(lower)) return true;
+    const softwareKeywords = [
+      "wallpaper engine", "godot engine", "rpg maker", "gamemaker", "visual novel maker",
+      "blender", "aseprite", "soundpad", "voiceattack", "sharex", "lossless scaling",
+      "displayfusion", "obs studio", "borderless gaming", "controller companion",
+      "virtual desktop", "fpsvr", "3dmark", "pcmark", "vrmark", "ovr advanced settings",
+      "xsoverlay", "desktop+", "stop sign vr"
+    ];
+    for (const sk of softwareKeywords) {
+      if (lower.includes(sk)) return true;
+    }
+    if (lower.endsWith(" driver") || lower.endsWith(" drivers")) return true;
+
+    // Dedicated servers
+    if (
+      lower.includes("dedicated server") ||
+      lower.includes("linux dedicated server") ||
+      lower.endsWith(" server") ||
+      lower.endsWith(" servers") ||
+      lower.includes(" - server") ||
+      lower.includes(" server ") ||
+      lower.endsWith(" ds")
+    ) {
+      return true;
+    }
+
+    // Depots, SDKs, authoring/publishing tools
+    if (
+      lower.includes("depot") ||
+      lower.includes("authoring tool") ||
+      lower.includes("publishing tool") ||
+      lower.includes("creation kit") ||
+      lower.includes("devkit") ||
+      lower.includes("sdk") ||
+      lower.includes("redistributable") ||
+      lower.includes("translation server") ||
+      lower.includes("content system")
+    ) {
+      return true;
+    }
+
+    // Betas, Demos, Alphas, Samples, Tests, Teasers, OSTs, Playtests
+    if (
+      lower.endsWith(" - beta") ||
+      lower.endsWith(" beta") ||
+      lower.endsWith(" (beta)") ||
+      lower.endsWith(" - test") ||
+      lower.endsWith(" test") ||
+      lower.endsWith(" (test)") ||
+      lower.endsWith(" - alpha") ||
+      lower.endsWith(" alpha") ||
+      lower.endsWith(" (alpha)") ||
+      lower.endsWith(" - demo") ||
+      lower.endsWith(" demo") ||
+      lower.endsWith(" (demo)") ||
+      lower.endsWith(" - teaser") ||
+      lower.endsWith(" (teaser)") ||
+      lower.endsWith(" teaser") ||
+      lower.endsWith(" - sample") ||
+      lower.endsWith(" (sample)") ||
+      lower.endsWith(" sample") ||
+      lower.endsWith(" - prototype") ||
+      lower.endsWith(" (prototype)") ||
+      lower.endsWith(" prototype") ||
+      lower.includes(" public test") ||
+      lower.includes(" public beta") ||
+      lower.includes(" closed beta") ||
+      lower.includes(" open beta") ||
+      lower.includes(" test server") ||
+      lower.includes(" test branch") ||
+      lower.includes(" beta branch") ||
+      lower.includes(" ost") ||
+      lower.endsWith(" ost") ||
+      lower.includes(" (ost)") ||
+      lower.includes(" - ost") ||
+      lower.includes("playtest") ||
+      lower.includes("trailer")
+    ) {
+      return true;
+    }
+
+    // Dedicated tool keywords
+    if (
+      lower.endsWith(" tool") ||
+      lower.endsWith(" tools") ||
+      lower.endsWith(" editor") ||
+      lower.endsWith(" viewer") ||
+      lower.endsWith(" launcher") ||
+      lower.endsWith(" creator") ||
+      lower.endsWith(" maker") ||
+      lower.includes(" editor -") ||
+      lower.includes(" tool -") ||
+      lower.includes("benchmarking")
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
   async function fetchLibrary(forceRefresh = false) {
     elements.gamesLoading.classList.remove("hidden");
     elements.gamesEmpty.classList.add("hidden");
     hideLibraryError();
 
     try {
-      const endpoint = forceRefresh ? "/api/library/refresh" : "/api/library";
-      const res = await fetch(endpoint, { method: forceRefresh ? "POST" : "GET" });
+      const ts = Date.now();
+      const endpoint = forceRefresh ? `/api/library/refresh?_t=${ts}` : `/api/library?_t=${ts}`;
+      const res = await fetch(endpoint, {
+        method: forceRefresh ? "POST" : "GET",
+        headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" }
+      });
       if (!res.ok) throw new Error("Failed to load library");
 
       const data = await res.json();
-      state.games = data.games || [];
+      state.games = (data.games || []).filter((g) => !isClientNonGame(g));
       elements.libraryCountBadge.textContent = state.games.length;
 
       lastSyncError = data.error || "";
@@ -778,11 +979,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const statusFilter = elements.filterStatus.value;
 
     return state.games.filter((game) => {
+      if (isClientNonGame(game)) return false;
+
       const matchesSearch =
         game.name.toLowerCase().includes(query) || String(game.appid).includes(query);
       if (!matchesSearch) return false;
-
-      if (game.is_tool) return false;
 
       if (statusFilter === "downloaded") return game.backup_status === "downloaded";
       if (statusFilter === "not_downloaded") return game.backup_status !== "downloaded";

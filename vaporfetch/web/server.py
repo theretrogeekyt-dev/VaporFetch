@@ -208,37 +208,55 @@ if FastAPI is not None:
             if not items:
                 items = [{"appid": g["appid"], "name": g["name"]} for g in library]
             added = manager.add_batch(items, platform=payload.platform)
-            return {"status": "ok", "queued_count": added, "message": f"Queued {added} games from entire library."}
+            return {
+                "status": "ok",
+                "queued_count": added,
+                "message": f"Queued {added} games from entire library.",
+                "queue_state": manager.get_queue_state(),
+            }
 
         if payload.appids:
             library_map = {g["appid"]: g["name"] for g in get_library(force_refresh=False)}
             items = [{"appid": aid, "name": library_map.get(aid) or resolver.resolve_name(aid)} for aid in payload.appids]
             added = manager.add_batch(items, platform=payload.platform)
-            return {"status": "ok", "queued_count": added, "message": f"Queued {added} selected games."}
+            return {
+                "status": "ok",
+                "queued_count": added,
+                "message": f"Queued {added} selected games.",
+                "queue_state": manager.get_queue_state(),
+            }
 
         if payload.appid:
             success = manager.add_to_queue(payload.appid, payload.name, payload.platform)
             if success:
-                return {"status": "ok", "message": f"App {payload.appid} queued."}
+                return {
+                    "status": "ok",
+                    "message": f"App {payload.appid} queued.",
+                    "queue_state": manager.get_queue_state(),
+                }
             else:
-                return {"status": "exists", "message": f"App {payload.appid} is already in the queue."}
+                return {
+                    "status": "exists",
+                    "message": f"App {payload.appid} is already in the queue.",
+                    "queue_state": manager.get_queue_state(),
+                }
 
         raise HTTPException(status_code=400, detail="No appid or all_games flag provided")
 
     @app.post("/api/queue/remove")
     async def remove_queue_endpoint(payload: QueueRemoveRequest):
         removed = manager.remove_from_queue(payload.appid)
-        return {"status": "ok", "removed": removed}
+        return {"status": "ok", "removed": removed, "queue_state": manager.get_queue_state()}
 
     @app.post("/api/queue/cancel")
     async def cancel_queue_endpoint():
         cancelled = manager.cancel_current()
-        return {"status": "ok", "cancelled": cancelled}
+        return {"status": "ok", "cancelled": cancelled, "queue_state": manager.get_queue_state()}
 
     @app.post("/api/queue/clear")
     async def clear_queue_endpoint():
         manager.clear_queue()
-        return {"status": "ok", "message": "Queue cleared"}
+        return {"status": "ok", "message": "Queue cleared", "queue_state": manager.get_queue_state()}
 
     @app.get("/api/settings")
     async def get_settings_endpoint():

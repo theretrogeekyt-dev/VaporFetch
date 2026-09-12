@@ -144,6 +144,10 @@ document.addEventListener("DOMContentLoaded", () => {
         btn.classList.add("active");
         const content = document.getElementById(targetTab);
         if (content) content.classList.add("active");
+
+        if (targetTab === "downloadsTab") {
+          fetchQueueState();
+        }
       });
     });
   }
@@ -243,6 +247,29 @@ document.addEventListener("DOMContentLoaded", () => {
       appendTerminalLog(event.data);
     }
   }
+
+  async function fetchQueueState() {
+    try {
+      const res = await fetch("/api/queue");
+      if (res.ok) {
+        const data = await res.json();
+        updateQueueUI(data);
+        if (data && data.storage) {
+          updateStorageUI(data.storage);
+        }
+      }
+    } catch (e) {
+      console.debug("Queue state poll notice:", e);
+    }
+  }
+
+  // Periodic polling fallback to keep queue & active download progress live even if SSE is buffered
+  setInterval(() => {
+    const downloadsActive = document.getElementById("downloadsTab")?.classList.contains("active");
+    if (downloadsActive || (state.queueState && (state.queueState.current || (state.queueState.queue && state.queueState.queue.length > 0)))) {
+      fetchQueueState();
+    }
+  }, 2500);
 
   function appendTerminalLog(logLine) {
     const lineElem = document.createElement("div");
@@ -1236,6 +1263,12 @@ document.addEventListener("DOMContentLoaded", () => {
       updateSelectedCount();
       renderGames();
 
+      if (data.queue_state) {
+        updateQueueUI(data.queue_state);
+      } else {
+        fetchQueueState();
+      }
+
       // Switch to downloads tab
       document.querySelector('[data-tab="downloadsTab"]').click();
     } catch (e) {
@@ -1258,6 +1291,11 @@ document.addEventListener("DOMContentLoaded", () => {
         body: JSON.stringify({ all_games: true, platform }),
       });
       const data = await res.json();
+      if (data.queue_state) {
+        updateQueueUI(data.queue_state);
+      } else {
+        fetchQueueState();
+      }
       alert(data.message || `Queued entire library!`);
       document.querySelector('[data-tab="downloadsTab"]').click();
     } catch (e) {
@@ -1281,6 +1319,11 @@ document.addEventListener("DOMContentLoaded", () => {
         body: JSON.stringify({ appid, name, platform }),
       });
       const data = await res.json();
+      if (data.queue_state) {
+        updateQueueUI(data.queue_state);
+      } else {
+        fetchQueueState();
+      }
       if (data.status === "exists") {
         if (cardBtn) {
           cardBtn.textContent = "Already Queued";
@@ -1314,13 +1357,19 @@ document.addEventListener("DOMContentLoaded", () => {
   function initQueueControls() {
     elements.clearQueueBtn.addEventListener("click", async () => {
       if (confirm("Clear all pending games from queue?")) {
-        await fetch("/api/queue/clear", { method: "POST" });
+        const res = await fetch("/api/queue/clear", { method: "POST" });
+        const data = await res.json();
+        if (data.queue_state) updateQueueUI(data.queue_state);
+        else fetchQueueState();
       }
     });
 
     elements.cancelActiveBtn.addEventListener("click", async () => {
       if (confirm("Cancel the current active download?")) {
-        await fetch("/api/queue/cancel", { method: "POST" });
+        const res = await fetch("/api/queue/cancel", { method: "POST" });
+        const data = await res.json();
+        if (data.queue_state) updateQueueUI(data.queue_state);
+        else fetchQueueState();
       }
     });
 
@@ -1383,11 +1432,14 @@ document.addEventListener("DOMContentLoaded", () => {
           </div>
         `;
         itemElem.querySelector(".remove-queue-btn").addEventListener("click", async () => {
-          await fetch("/api/queue/remove", {
+          const res = await fetch("/api/queue/remove", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ appid: item.appid }),
           });
+          const data = await res.json();
+          if (data.queue_state) updateQueueUI(data.queue_state);
+          else fetchQueueState();
         });
         elements.queueList.appendChild(itemElem);
       });

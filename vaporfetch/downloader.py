@@ -103,6 +103,8 @@ class DownloadManager:
         """Record a log message and broadcast it."""
         timestamp = time.strftime("%H:%M:%S")
         formatted = f"[{timestamp}] {text}"
+        logger.info(text)
+        print(f"[VaporFetch] {formatted}", flush=True)
         self.log_history.append(formatted)
         self.broadcast("log", formatted)
 

@@ -1453,7 +1453,8 @@ def run_app_download(
             accum += chunk
 
             # Check for interactive password prompt if not passed on CLI
-            if not password_injected and re.search(r"(?:^|[\r\n])[^\r\n]*?[Pp]assword:\s*$", accum):
+            clean_accum = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', accum)
+            if not password_injected and re.search(r"(?:^|[\r\n])[^\r\n]*?[Pp]assword:\s*", clean_accum):
                 password_injected = True
                 if pwd:
                     if log_cb:

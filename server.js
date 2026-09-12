@@ -147,11 +147,42 @@ app.get('/api/library', (req, res) => {
   }
 });
 
+// Library: Get detected local Steam accounts
+app.get('/api/library/detected-accounts', (req, res) => {
+  try {
+    const accounts = libraryManager.detectLocalSteamAccounts();
+    res.json({ success: true, accounts });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Library: Add a game
 app.post('/api/library', (req, res) => {
   try {
     const game = libraryManager.addGame(req.body);
     res.json({ success: true, game });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// Library: Batch import from AppIDs or text
+app.post('/api/library/import-ids', async (req, res) => {
+  try {
+    const { text } = req.body;
+    const result = await libraryManager.importFromAppIds(text);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// Library: Sync from local SteamCMD cached userdata
+app.post('/api/library/sync-cache', async (req, res) => {
+  try {
+    const result = await libraryManager.syncFromLocalCache();
+    res.json(result);
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
   }

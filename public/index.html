@@ -353,42 +353,63 @@
           <button type="button" class="btn-icon" id="btn-close-sync-modal">&times;</button>
         </div>
         <div class="modal-body">
-          <div class="radio-toggle-group" style="margin-bottom: 1.25rem;">
-            <label class="radio-card">
-              <input type="radio" name="syncMethod" value="web" checked>
-              <div class="radio-card-content">
-                <span class="radio-title">Steam Web API / Profile</span>
-                <span class="radio-desc">Sync using Steam Username, SteamID, or API Key</span>
-              </div>
-            </label>
-            <label class="radio-card">
-              <input type="radio" name="syncMethod" value="steamcmd">
-              <div class="radio-card-content">
-                <span class="radio-title">SteamCMD Account</span>
-                <span class="radio-desc">Direct session sync (works on private profiles)</span>
-              </div>
-            </label>
+          <!-- Auto-Detected Local Accounts Banner -->
+          <div id="detected-accounts-container" class="hidden"></div>
+
+          <!-- Method Tabs Navigation -->
+          <div class="sync-tab-nav">
+            <button type="button" class="sync-tab-btn active" data-tab-target="sync-box-web">Steam Web API / Profile</button>
+            <button type="button" class="sync-tab-btn" data-tab-target="sync-box-batch">Batch AppID Import</button>
+            <button type="button" class="sync-tab-btn" data-tab-target="sync-box-steamcmd">SteamCMD Direct Sync</button>
+            <button type="button" class="sync-tab-btn" data-tab-target="sync-box-cache">Local NAS Cache</button>
           </div>
 
-          <!-- Web Sync Box -->
-          <div id="sync-box-web">
+          <!-- TAB 1: Web API & Public Profile -->
+          <div id="sync-box-web" class="sync-panel">
             <div class="form-group">
-              <label for="sync-identifier" class="input-label">Steam Username / Vanity URL / SteamID64 <span class="required">*</span></label>
-              <input type="text" id="sync-identifier" placeholder="e.g. reaper360vr or 76561198..." class="form-input">
-              <small class="field-hint">You can enter your custom vanity URL (reaper360vr), profile link, or 17-digit SteamID64.</small>
+              <label for="sync-identifier" class="input-label">17-digit SteamID64 or Vanity URL <span class="required">*</span></label>
+              <input type="text" id="sync-identifier" placeholder="e.g. 76561198012345678 or custom-url" class="form-input">
+              <small class="field-hint">
+                Steam login account names are private to Valve. Please enter your 17-digit <strong>SteamID64</strong>. Look it up quickly at <a href="https://steamid.io" target="_blank" rel="noopener">steamid.io</a> or in Steam: Account Details.
+              </small>
             </div>
             <div class="form-group">
-              <label for="sync-apikey" class="input-label">Steam Web API Key</label>
-              <input type="password" id="sync-apikey" placeholder="Enter API Key (required if game details are not public)" class="form-input">
-              <small class="field-hint">Get a free key from <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">steamcommunity.com/dev/apikey</a> (Domain can be anything like 'localhost').</small>
+              <label for="sync-apikey" class="input-label">Steam Web API Key <span class="badge-hint">Recommended</span></label>
+              <input type="password" id="sync-apikey" placeholder="Enter Steam Web API Key" class="form-input">
+              <small class="field-hint">Get a free key from <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">steamcommunity.com/dev/apikey</a> (Domain can be 'localhost').</small>
             </div>
-            <div class="secure-notice" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;">
-              <strong>Tip:</strong> If your profile is private, set <em>Game Details</em> to <em>Public</em> in Steam (Profile &rarr; Edit Profile &rarr; Privacy Settings &rarr; Game details &rarr; Public).
+            <div class="privacy-callout">
+              <div class="privacy-callout-header">
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                <span>Why did Steam return 0 games?</span>
+              </div>
+              <div>Valve sets profile Game Details to Private by default! To sync via Web API:</div>
+              <ol>
+                <li>In Steam, open <strong>View Profile &rarr; Edit Profile &rarr; Privacy Settings</strong>.</li>
+                <li>Set <strong>Game details</strong> to <strong>Public</strong>.</li>
+                <li>Uncheck <em>"Always keep my total playtime private"</em>.</li>
+              </ol>
+              <small class="text-muted">Want to keep your profile private? Use the <strong>Batch AppID Import</strong> or <strong>SteamCMD Direct Sync</strong> tab!</small>
             </div>
           </div>
 
-          <!-- SteamCMD Sync Box -->
-          <div id="sync-box-steamcmd" class="hidden">
+          <!-- TAB 2: Batch AppID Import (No Privacy / Key Needed) -->
+          <div id="sync-box-batch" class="sync-panel hidden">
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+              Import games without entering credentials or modifying profile privacy settings! Paste AppIDs, Steam store URLs, or a text list below.
+            </p>
+            <div class="form-group">
+              <label for="sync-batch-input" class="input-label">Paste Steam AppIDs or Store Links <span class="required">*</span></label>
+              <textarea id="sync-batch-input" class="form-textarea" placeholder="e.g. 2280, 730, 105600, 1086940, 1245620&#10;or https://store.steampowered.com/app/2280/DOOM/"></textarea>
+              <small class="field-hint">Any numeric AppIDs will be parsed, verified with Steam, and added with cover art to your library.</small>
+            </div>
+          </div>
+
+          <!-- TAB 3: SteamCMD Direct Account Sync -->
+          <div id="sync-box-steamcmd" class="sync-panel hidden">
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+              Authenticates directly with Valve's Steam servers using SteamCMD. Directly queries all game licenses owned by your account, completely bypassing Web API privacy limitations!
+            </p>
             <div class="form-group">
               <label for="sync-cmd-username" class="input-label">Steam Username <span class="required">*</span></label>
               <input type="text" id="sync-cmd-username" placeholder="e.g. reaper360vr" class="form-input">
@@ -396,7 +417,18 @@
             <div class="form-group">
               <label for="sync-cmd-password" class="input-label">Steam Password <span class="badge-hint">Optional if already cached</span></label>
               <input type="password" id="sync-cmd-password" placeholder="Leave empty if logged in previously" class="form-input">
-              <small class="field-hint">SteamCMD will query all licenses owned by your account directly from Valve's servers.</small>
+              <small class="field-hint">If your account requires 2FA and hasn't logged in yet, start a game download once in the Direct Download tab to cache your 2FA session token.</small>
+            </div>
+          </div>
+
+          <!-- TAB 4: Local NAS Cache -->
+          <div id="sync-box-cache" class="sync-panel hidden">
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+              Load games from licenses and userdata already cached locally on your NAS volume by SteamCMD.
+            </p>
+            <div class="metric-chip" style="display: block; padding: 1rem; margin-bottom: 1rem;">
+              <span class="chip-label" style="display: block; margin-bottom: 0.25rem;">Local Storage Cache:</span>
+              <span style="font-size: 0.85rem; color: var(--text-primary);">Reads cached Steam userdata and manifests stored in <code>/config</code> and <code>/downloads</code>.</span>
             </div>
           </div>
         </div>

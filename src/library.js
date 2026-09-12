@@ -142,6 +142,255 @@ class LibraryManager {
   }
 
   /**
+   * Detect logged-in Steam accounts from local SteamCMD config.vdf, loginusers.vdf, and userdata folders
+   */
+  detectLocalSteamAccounts() {
+    const detected = [];
+
+    // 1. Scan loginusers.vdf files (stores AccountName and SteamID64 for every user that ever logged in)
+    const loginUserCandidates = [
+      path.join(this.configDir, 'Steam', 'config', 'loginusers.vdf'),
+      path.join(this.configDir, '.steam', 'steam', 'config', 'loginusers.vdf'),
+      path.join(this.configDir, '.steam', 'config', 'loginusers.vdf'),
+      path.join(this.configDir, 'config', 'loginusers.vdf'),
+      path.join(this.configDir, 'loginusers.vdf'),
+      path.join('/root', 'Steam', 'config', 'loginusers.vdf'),
+      path.join('/root', '.steam', 'steam', 'config', 'loginusers.vdf'),
+      path.join('/root', '.steam', 'config', 'loginusers.vdf'),
+      path.join('/usr/local/steamcmd', 'config', 'loginusers.vdf')
+    ];
+
+    for (const file of loginUserCandidates) {
+      if (fs.existsSync(file)) {
+        try {
+          const content = fs.readFileSync(file, 'utf8');
+          const userMatches = content.matchAll(/"(\d{17})"\s*\{([^}]+)\}/gi);
+          for (const um of userMatches) {
+            const steamId64 = um[1];
+            const block = um[2];
+            const accMatch = block.match(/"AccountName"\s*"([^"]+)"/i);
+            const personaMatch = block.match(/"PersonaName"\s*"([^"]+)"/i);
+            const accountName = accMatch ? accMatch[1] : `User_${steamId64}`;
+            const personaName = personaMatch ? personaMatch[1] : accountName;
+            if (!detected.some(d => d.steamId64 === steamId64)) {
+              detected.push({
+                username: accountName,
+                personaName: personaName,
+                steamId64: steamId64,
+                source: 'Steam login cache (loginusers.vdf)'
+              });
+            }
+          }
+        } catch (e) {}
+      }
+    }
+
+    // 2. Scan config.vdf files
+    const configCandidates = [
+      path.join(this.configDir, 'Steam', 'config', 'config.vdf'),
+      path.join(this.configDir, '.steam', 'steam', 'config', 'config.vdf'),
+      path.join(this.configDir, '.steam', 'config', 'config.vdf'),
+      path.join(this.configDir, 'config', 'config.vdf'),
+      path.join('/root', 'Steam', 'config', 'config.vdf'),
+      path.join('/root', '.steam', 'steam', 'config', 'config.vdf'),
+      path.join('/usr/local/steamcmd', 'config', 'config.vdf')
+    ];
+
+    for (const file of configCandidates) {
+      if (fs.existsSync(file)) {
+        try {
+          const content = fs.readFileSync(file, 'utf8');
+          const userBlocks = content.matchAll(/"([^"]+)"\s*\{\s*[^}]*?"SteamID"\s*"(\d{17})"/gi);
+          for (const ub of userBlocks) {
+            if (!['Software', 'Valve', 'Steam', 'Accounts', 'InstallConfigStore'].includes(ub[1])) {
+              if (!detected.some(d => d.steamId64 === ub[2])) {
+                detected.push({
+                  username: ub[1],
+                  personaName: ub[1],
+                  steamId64: ub[2],
+                  source: 'SteamCMD config.vdf'
+                });
+              }
+            }
+          }
+        } catch (e) {}
+      }
+    }
+
+    // 3. Scan userdata folders
+    const userdataDirs = [
+      path.join(this.configDir, 'Steam', 'userdata'),
+      path.join(this.configDir, '.steam', 'steam', 'userdata'),
+      path.join(this.configDir, 'userdata'),
+      path.join('/root', 'Steam', 'userdata'),
+      path.join('/root', '.steam', 'steam', 'userdata'),
+      path.join('/usr/local/steamcmd', 'userdata')
+    ];
+
+    for (const udir of userdataDirs) {
+      if (fs.existsSync(udir)) {
+        try {
+          const entries = fs.readdirSync(udir, { withFileTypes: true });
+          for (const d of entries) {
+            if (d.isDirectory() && /^\d+$/.test(d.name) && d.name !== '0') {
+              try {
+                const accountId32 = BigInt(d.name);
+                const steamId64 = (accountId32 + 76561197960265728n).toString();
+                if (!detected.some(acc => acc.steamId64 === steamId64)) {
+                  detected.push({
+                    username: `Account (${d.name})`,
+                    personaName: `Account (${d.name})`,
+                    steamId64: steamId64,
+                    source: 'Steam userdata'
+                  });
+                }
+              } catch (e) {}
+            }
+          }
+        } catch (e) {}
+      }
+    }
+
+    return detected;
+  }
+
+  /**
+   * Extract game AppIDs cached in localconfig.vdf and sharedconfig.vdf
+   */
+  extractGamesFromLocalConfig() {
+    const foundAppIds = new Set();
+    const userdataDirs = [
+      path.join(this.configDir, 'Steam', 'userdata'),
+      path.join(this.configDir, '.steam', 'steam', 'userdata'),
+      path.join(this.configDir, 'userdata'),
+      path.join('/usr/local/steamcmd', 'userdata')
+    ];
+
+    for (const udir of userdataDirs) {
+      if (!fs.existsSync(udir)) continue;
+      try {
+        const subdirs = fs.readdirSync(udir, { withFileTypes: true });
+        for (const sub of subdirs) {
+          if (!sub.isDirectory()) continue;
+
+          // 1. localconfig.vdf
+          const localConfig = path.join(udir, sub.name, 'config', 'localconfig.vdf');
+          if (fs.existsSync(localConfig)) {
+            try {
+              const txt = fs.readFileSync(localConfig, 'utf8');
+              const matches = txt.matchAll(/"(\d{2,8})"\s*\{/g);
+              for (const m of matches) {
+                const id = m[1];
+                if (parseInt(id, 10) > 100) foundAppIds.add(id);
+              }
+            } catch (e) {}
+          }
+
+          // 2. sharedconfig.vdf
+          const sharedConfig = path.join(udir, sub.name, '7', 'remote', 'sharedconfig.vdf');
+          if (fs.existsSync(sharedConfig)) {
+            try {
+              const txt = fs.readFileSync(sharedConfig, 'utf8');
+              const matches = txt.matchAll(/"(\d{2,8})"\s*\{/g);
+              for (const m of matches) {
+                const id = m[1];
+                if (parseInt(id, 10) > 100) foundAppIds.add(id);
+              }
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
+    }
+
+    return Array.from(foundAppIds);
+  }
+
+  /**
+   * Import games directly from local SteamCMD cached userdata
+   */
+  async syncFromLocalCache() {
+    const appIds = this.extractGamesFromLocalConfig();
+    if (!appIds || appIds.length === 0) {
+      throw new Error('No game licenses cached locally yet. As you download games with SteamCMD, your library cache will populate here.');
+    }
+
+    let addedCount = 0;
+    for (const appId of appIds) {
+      if (!this.userGames.some(g => g.appId === appId)) {
+        const info = await getAppInfo(appId);
+        const name = info.name || `App ${appId}`;
+        const dir = (name || appId).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+
+        this.userGames.push({
+          appId,
+          name,
+          dir,
+          type: 'game',
+          platform: 'windows',
+          anonymous: false,
+          headerImage: info.headerImage || `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appId}/header.jpg`
+        });
+        addedCount++;
+      }
+    }
+
+    this.saveUserLibrary();
+
+    return {
+      success: true,
+      totalImported: appIds.length,
+      newlyAdded: addedCount,
+      games: this.getLibrary()
+    };
+  }
+
+  /**
+   * Batch import games from a list of AppIDs or text
+   */
+  async importFromAppIds(text) {
+    if (!text || typeof text !== 'string') {
+      throw new Error('Please provide text containing Steam AppIDs.');
+    }
+
+    const rawMatches = text.match(/\b\d{2,8}\b/g) || [];
+    const uniqueIds = Array.from(new Set(rawMatches));
+
+    if (uniqueIds.length === 0) {
+      throw new Error('No numeric Steam AppIDs found in the provided text.');
+    }
+
+    let addedCount = 0;
+
+    for (const appId of uniqueIds) {
+      if (!this.userGames.some(g => g.appId === appId)) {
+        const info = await getAppInfo(appId);
+        const name = info.name || `App ${appId}`;
+        const dir = (name || appId).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+
+        this.userGames.push({
+          appId,
+          name,
+          dir,
+          type: 'game',
+          platform: 'windows',
+          anonymous: false,
+          headerImage: info.headerImage || `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appId}/header.jpg`
+        });
+        addedCount++;
+      }
+    }
+
+    this.saveUserLibrary();
+
+    return {
+      success: true,
+      totalImported: uniqueIds.length,
+      newlyAdded: addedCount,
+      games: this.getLibrary()
+    };
+  }
+
+  /**
    * Resolve vanity URL or profile link to a numeric 64-bit Steam ID
    */
   async resolveToSteamId64(identifier, apiKey) {
@@ -152,7 +401,19 @@ class LibraryManager {
       return clean;
     }
 
-    // 1. Steam Web API ResolveVanityURL
+    // 1. Check local SteamCMD accounts detected on this container FIRST (0ms latency, handles private login names)
+    const localAccounts = this.detectLocalSteamAccounts();
+    const matched = localAccounts.find(a => 
+      a.username.toLowerCase() === clean.toLowerCase() || 
+      (a.personaName && a.personaName.toLowerCase() === clean.toLowerCase()) || 
+      a.steamId64 === clean
+    );
+    if (matched) {
+      console.log(`[VaporFetch] Resolved "${clean}" to SteamID64 ${matched.steamId64} via local Steam login cache (${matched.source})`);
+      return matched.steamId64;
+    }
+
+    // 2. Steam Web API ResolveVanityURL
     if (apiKey) {
       try {
         const url = `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/?key=${encodeURIComponent(apiKey)}&vanityurl=${encodeURIComponent(clean)}`;
@@ -165,7 +426,7 @@ class LibraryManager {
       }
     }
 
-    // 2. Steam Community XML lookup
+    // 3. Steam Community XML lookup
     try {
       const url = `https://steamcommunity.com/id/${encodeURIComponent(clean)}/?xml=1`;
       const xml = await this.httpGetText(url);
@@ -182,8 +443,6 @@ class LibraryManager {
 
   /**
    * Sync games from Steam Community profile or Steam Web API
-   * @param {string} identifier - Steam Username, Custom Vanity URL, or SteamID64
-   * @param {string} [apiKey] - Optional Steam Web API Key
    */
   async syncSteamLibrary(identifier, apiKey) {
     let clean = String(identifier || '').trim();
@@ -205,17 +464,30 @@ class LibraryManager {
     // Step 2: Fetch via Web API if API key is provided
     if (apiKey) {
       if (!steamId64) {
-        errors.push(`Could not resolve vanity URL "${clean}" to a 64-bit Steam ID. Check username or enter your 17-digit SteamID64 directly.`);
+        errors.push(`Could not resolve username/vanity "${clean}" to a numeric SteamID64. Try entering your 17-digit SteamID64 directly.`);
       } else {
         try {
           games = await this.fetchViaWebApi(steamId64, apiKey);
         } catch (err) {
-          errors.push(`Web API error: ${err.message}`);
+          errors.push(`Web API: ${err.message}`);
         }
       }
     }
 
-    // Step 3: Fallback to Steam Community games XML (no API key needed)
+    // Step 3: Try Community HTML embed (var rgGames = [...])
+    if (!games || games.length === 0) {
+      try {
+        const idToTry = steamId64 || clean;
+        const htmlGames = await this.fetchViaCommunityHtml(idToTry);
+        if (htmlGames && htmlGames.length > 0) {
+          games = htmlGames;
+        }
+      } catch (err) {
+        errors.push(`Community HTML: ${err.message}`);
+      }
+    }
+
+    // Step 4: Fallback to Steam Community XML
     if (!games || games.length === 0) {
       try {
         const idToTry = steamId64 || clean;
@@ -224,19 +496,19 @@ class LibraryManager {
           games = xmlGames;
         }
       } catch (err) {
-        errors.push(`Community XML error: ${err.message}`);
+        errors.push(`Community XML: ${err.message}`);
       }
     }
 
     // If still no games, provide clear instructions
     if (!games || games.length === 0) {
-      const details = errors.length > 0 ? `\nDetails: ${errors.join('\n')}` : '';
+      const details = errors.length > 0 ? `\n\nDetails:\n${errors.join('\n')}` : '';
       throw new Error(
-        `Failed to retrieve games for "${clean}".${details}\n\n` +
+        `Could not retrieve games for "${clean}".${details}\n\n` +
         `Troubleshooting:\n` +
-        `1. If using an API key, enter your 17-digit SteamID64 (from your Steam account details or steamid.io).\n` +
-        `2. Ensure your Steam Privacy Settings are set to Public: In Steam, go to Profile -> Edit Profile -> Privacy Settings -> Set "Game details" to "Public" and uncheck "Always keep my total playtime private".\n` +
-        `3. Or use "Sync via SteamCMD" to fetch owned licenses directly with your Steam login.`
+        `1. Steam Privacy Settings: In your Steam Profile -> Edit Profile -> Privacy Settings -> Set "Game details" to "Public" and uncheck "Always keep my total playtime private".\n` +
+        `2. Use your 17-digit numeric SteamID64 (from Steam -> Account details, or steamid.io) rather than your login name.\n` +
+        `3. Or use the "Batch AppID Import" tab to paste your AppIDs directly!`
       );
     }
 
@@ -284,7 +556,7 @@ class LibraryManager {
 
     return new Promise((resolve, reject) => {
       let output = '';
-      let isError = false;
+      let procExited = false;
 
       const proc = spawn(this.steamCmdPath, args, {
         env: {
@@ -294,50 +566,88 @@ class LibraryManager {
         }
       });
 
+      // 45s timeout for SteamCMD command
+      const timer = setTimeout(() => {
+        if (!procExited) {
+          try { proc.kill('SIGKILL'); } catch (e) {}
+          reject(new Error('SteamCMD license sync timed out after 45 seconds. Check network connection or verify credentials.'));
+        }
+      }, 45000);
+
       proc.stdout.on('data', chunk => output += chunk.toString());
       proc.stderr.on('data', chunk => output += chunk.toString());
 
       proc.on('close', async (code) => {
+        procExited = true;
+        clearTimeout(timer);
+
         if (/Steam Guard code:/i.test(output) || /Two-factor code:/i.test(output)) {
-          return reject(new Error('Steam Guard 2FA is required. Please login once via a download task to cache your Steam Guard token, then retry.'));
+          return reject(new Error('Steam Guard 2FA is required. Start a game download once (e.g. DOOM II) with your credentials in the Direct Download tab to complete 2FA verification. Once logged in, your session token is saved on the NAS and you can sync anytime!'));
         }
 
         if (/Invalid Password/i.test(output) || /Login Failure/i.test(output)) {
-          return reject(new Error('Steam login failure: Invalid username or password.'));
+          return reject(new Error('Steam login failure: Invalid username or password. Please verify your login credentials.'));
         }
 
-        // Parse AppIDs from licenses_print output
-        // Patterns in SteamCMD: "License packageID 12345: AppID 2280 (DOOM + DOOM II)" or "- Package 123: AppID 2280"
-        const foundAppIds = new Set();
-        const appMatches = output.matchAll(/AppID\s*[:\s](\d+)(?:\s*\(([^)]+)\))?/gi);
+        if (/Rate Limit Exceeded/i.test(output)) {
+          return reject(new Error('Steam rate limit exceeded. Please wait a few minutes before trying again.'));
+        }
 
-        for (const m of appMatches) {
-          const appId = m[1];
-          // Filter out internal tools / runtime IDs
-          if (parseInt(appId, 10) > 10) {
-            foundAppIds.add(appId);
+        // Parse AppIDs and optional titles from licenses_print output
+        // Formats:
+        //  - AppID 2280 : "DOOM + DOOM II"
+        //  - AppID 730
+        const foundApps = new Map();
+        const regexDetailed = /-\s*AppID\s*(\d+)\s*:\s*"([^"]+)"/gi;
+        let match;
+        while ((match = regexDetailed.exec(output)) !== null) {
+          const id = match[1];
+          const name = match[2].trim();
+          if (parseInt(id, 10) > 10) {
+            foundApps.set(id, name);
           }
         }
 
-        if (foundAppIds.size === 0) {
-          return reject(new Error('No licenses found in SteamCMD output. Make sure the account owns games.'));
+        const regexSimple = /AppID\s*[:\s]\s*(\d+)/gi;
+        while ((match = regexSimple.exec(output)) !== null) {
+          const id = match[1];
+          if (parseInt(id, 10) > 10 && !foundApps.has(id)) {
+            foundApps.set(id, null);
+          }
+        }
+
+        if (foundApps.size === 0) {
+          return reject(new Error('No licenses found in SteamCMD output. If SteamCMD did not finish logging in, try downloading a game first to establish the authenticated session.'));
         }
 
         let addedCount = 0;
-        const appList = Array.from(foundAppIds);
+        const appEntries = Array.from(foundApps.entries());
 
-        // Batch inspect up to 50 games for names
-        for (const appId of appList.slice(0, 50)) {
+        for (const [appId, gameName] of appEntries) {
           if (!this.userGames.some(g => g.appId === appId)) {
-            const info = await getAppInfo(appId);
+            let name = gameName;
+            let headerImage = `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appId}/header.jpg`;
+
+            if (!name) {
+              try {
+                const info = await getAppInfo(appId);
+                name = info.name || `App ${appId}`;
+                headerImage = info.headerImage || headerImage;
+              } catch (e) {
+                name = `App ${appId}`;
+              }
+            }
+
+            const dir = (name || appId).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+
             this.userGames.push({
               appId,
-              name: info.name || `App ${appId}`,
-              dir: (info.name || appId).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''),
+              name,
+              dir,
               type: 'game',
               platform: 'windows',
               anonymous: false,
-              headerImage: info.headerImage || `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appId}/header.jpg`
+              headerImage
             });
             addedCount++;
           }
@@ -347,13 +657,47 @@ class LibraryManager {
 
         resolve({
           success: true,
-          totalImported: foundAppIds.size,
+          totalImported: foundApps.size,
           newlyAdded: addedCount,
           games: this.getLibrary()
         });
       });
 
-      proc.on('error', (err) => reject(new Error(`Failed to execute steamcmd: ${err.message}`)));
+      proc.on('error', (err) => {
+        procExited = true;
+        clearTimeout(timer);
+        reject(new Error(`Failed to execute steamcmd: ${err.message}`));
+      });
+    });
+  }
+
+  fetchViaCommunityHtml(identifier) {
+    return new Promise((resolve) => {
+      const isSteamId64 = /^\d{17}$/.test(identifier);
+      const urlPath = isSteamId64 ? `/profiles/${identifier}/games/?tab=all` : `/id/${identifier}/games/?tab=all`;
+      const url = `https://steamcommunity.com${urlPath}`;
+
+      this.httpGetText(url).then(html => {
+        const match = html.match(/var\s+rgGames\s*=\s*(\[[\s\S]*?\]);/i);
+        if (match) {
+          try {
+            const parsed = JSON.parse(match[1]);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              const list = parsed.map(g => ({
+                appId: String(g.appid),
+                name: g.name || `App ${g.appid}`,
+                dir: (g.name || String(g.appid)).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''),
+                type: 'game',
+                platform: 'windows',
+                anonymous: false,
+                headerImage: `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${g.appid}/header.jpg`
+              }));
+              return resolve(list);
+            }
+          } catch (e) {}
+        }
+        resolve([]);
+      }).catch(() => resolve([]));
     });
   }
 
@@ -402,13 +746,13 @@ class LibraryManager {
 
       https.get(url, { headers: { 'User-Agent': 'VaporFetch/1.0' }, timeout: 15000 }, (res) => {
         if (res.statusCode === 403) {
-          return reject(new Error('HTTP 403 Forbidden: Invalid Steam Web API Key.'));
+          return reject(new Error('HTTP 403 Forbidden: Invalid Steam Web API Key. Check your key at steamcommunity.com/dev/apikey'));
         }
         if (res.statusCode === 400) {
-          return reject(new Error('HTTP 400 Bad Request: Invalid SteamID parameter.'));
+          return reject(new Error('HTTP 400 Bad Request: Invalid SteamID parameter. Must be a 17-digit SteamID64 (e.g. 76561198...).'));
         }
         if (res.statusCode !== 200) {
-          return reject(new Error(`HTTP ${res.statusCode} from Steam API.`));
+          return reject(new Error(`HTTP ${res.statusCode} from Steam Web API.`));
         }
 
         let data = '';
@@ -429,7 +773,16 @@ class LibraryManager {
                 }));
                 return resolve(list);
               } else {
-                return reject(new Error('Steam returned an empty game list. In Steam Privacy Settings, please verify "Game details" is set to "Public" and uncheck "Always keep playtime private".'));
+                return reject(new Error(
+                  'Steam Web API returned an empty game list (0 games found).\n\n' +
+                  'Why this happens:\n' +
+                  'Valve sets "Game details" to Private by default on all Steam profiles!\n\n' +
+                  'How to fix it in 15 seconds:\n' +
+                  '1. In Steam, go to your Profile -> Edit Profile -> Privacy Settings\n' +
+                  '2. Set "Game details" to "Public"\n' +
+                  '3. Uncheck "Always keep my total playtime private"\n\n' +
+                  'Tip: If you prefer to keep your profile private, use the "Batch AppID Import" tab or "SteamCMD Account Sync" tab instead!'
+                ));
               }
             }
             reject(new Error('Invalid response structure from Steam Web API.'));

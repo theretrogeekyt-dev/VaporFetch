@@ -142,6 +142,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btnOpenSyncModal.addEventListener('click', () => {
       syncModal.classList.remove('hidden');
       syncIdentifier.focus();
+      checkDetectedAccounts();
     });
 
     btnOpenAddGame.addEventListener('click', () => {
@@ -326,39 +327,131 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Sync Modal Method Toggle
-  const syncMethodRadios = document.querySelectorAll('input[name="syncMethod"]');
-  const syncBoxWeb = document.getElementById('sync-box-web');
-  const syncBoxSteamCmd = document.getElementById('sync-box-steamcmd');
+  // Sync Modal Tabs & Inputs
+  const syncTabButtons = document.querySelectorAll('.sync-tab-btn');
+  const syncPanels = document.querySelectorAll('.sync-panel');
+  const syncBatchInput = document.getElementById('sync-batch-input');
   const syncCmdUsername = document.getElementById('sync-cmd-username');
   const syncCmdPassword = document.getElementById('sync-cmd-password');
+  const detectedAccountsContainer = document.getElementById('detected-accounts-container');
+  let activeSyncTab = 'sync-box-web';
 
-  syncMethodRadios.forEach(r => {
-    r.addEventListener('change', () => {
-      if (r.value === 'steamcmd') {
-        syncBoxSteamCmd.classList.remove('hidden');
-        syncBoxWeb.classList.add('hidden');
-      } else {
-        syncBoxWeb.classList.remove('hidden');
-        syncBoxSteamCmd.classList.add('hidden');
+  // Sync Tab Switching
+  syncTabButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      syncTabButtons.forEach(b => b.classList.remove('active'));
+      syncPanels.forEach(p => p.classList.add('hidden'));
+
+      btn.classList.add('active');
+      const targetId = btn.getAttribute('data-tab-target');
+      activeSyncTab = targetId;
+
+      const targetPanel = document.getElementById(targetId);
+      if (targetPanel) targetPanel.classList.remove('hidden');
+
+      // Update submit button text based on tab
+      if (targetId === 'sync-box-web') {
+        btnSubmitSync.textContent = 'Sync Steam Profile';
+      } else if (targetId === 'sync-box-batch') {
+        btnSubmitSync.textContent = 'Import Games';
+      } else if (targetId === 'sync-box-steamcmd') {
+        btnSubmitSync.textContent = 'Sync via SteamCMD';
+      } else if (targetId === 'sync-box-cache') {
+        btnSubmitSync.textContent = 'Sync from Local Cache';
       }
     });
   });
 
-  // Sync Steam Account Submit
-  btnSubmitSync.addEventListener('click', async () => {
-    const method = document.querySelector('input[name="syncMethod"]:checked')?.value || 'web';
+  // Check detected accounts from SteamCMD on NAS
+  async function checkDetectedAccounts() {
+    if (!detectedAccountsContainer) return;
+    try {
+      const res = await fetch('/api/library/detected-accounts');
+      const data = await res.json();
+      if (data.success && data.accounts && data.accounts.length > 0) {
+        const acc = data.accounts[0];
+        detectedAccountsContainer.innerHTML = `
+          <div class="detected-account-card">
+            <div class="detected-account-info">
+              <span class="detected-account-title">
+                <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                Detected Steam Account on NAS
+              </span>
+              <span class="detected-account-desc"><strong>${acc.personaName || acc.username}</strong> (${acc.username}) &bull; SteamID64: <code>${acc.steamId64}</code></span>
+            </div>
+            <button type="button" class="btn-secondary btn-sm" id="btn-autofill-account">Use Account</button>
+          </div>
+        `;
+        detectedAccountsContainer.classList.remove('hidden');
 
+        const autofillBtn = document.getElementById('btn-autofill-account');
+        if (autofillBtn) {
+          autofillBtn.addEventListener('click', () => {
+            syncIdentifier.value = acc.steamId64;
+            syncCmdUsername.value = acc.username;
+            // Switch to web sync tab if not already
+            const webTabBtn = document.querySelector('.sync-tab-btn[data-tab-target="sync-box-web"]');
+            if (webTabBtn) webTabBtn.click();
+          });
+        }
+      } else {
+        detectedAccountsContainer.classList.add('hidden');
+      }
+    } catch (e) {
+      detectedAccountsContainer.classList.add('hidden');
+    }
+  }
+
+  // Unified Sync Modal Submit Handler
+  btnSubmitSync.addEventListener('click', async () => {
     btnSubmitSync.disabled = true;
-    btnSubmitSync.textContent = 'Syncing...';
+    const oldText = btnSubmitSync.textContent;
+    btnSubmitSync.textContent = 'Processing...';
 
     try {
-      if (method === 'steamcmd') {
+      if (activeSyncTab === 'sync-box-batch') {
+        // Method 1: Batch AppID / Link Import
+        const text = (syncBatchInput?.value || '').trim();
+        if (!text) {
+          alert('Please enter one or more numeric Steam AppIDs or store links.');
+          return;
+        }
+
+        const res = await fetch('/api/library/import-ids', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text })
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          syncModal.classList.add('hidden');
+          alert(`Import complete! Found ${data.totalImported} AppIDs (${data.newlyAdded} newly added to your library).`);
+          if (syncBatchInput) syncBatchInput.value = '';
+          fetchLibrary();
+        } else {
+          alert(`Import failed: ${data.error}`);
+        }
+      } else if (activeSyncTab === 'sync-box-cache') {
+        // Method 2: Local NAS Storage Cache
+        const res = await fetch('/api/library/sync-cache', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          syncModal.classList.add('hidden');
+          alert(`Cache sync complete! Loaded ${data.totalImported} game licenses from local NAS cache (${data.newlyAdded} newly added).`);
+          fetchLibrary();
+        } else {
+          alert(`Cache sync: ${data.error}`);
+        }
+      } else if (activeSyncTab === 'sync-box-steamcmd') {
+        // Method 3: SteamCMD Direct Query
         const username = syncCmdUsername.value.trim();
         if (!username) {
           alert('Please enter your Steam username.');
-          btnSubmitSync.disabled = false;
-          btnSubmitSync.textContent = 'Sync Games';
           return;
         }
 
@@ -374,17 +467,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = await res.json();
         if (data.success) {
           syncModal.classList.add('hidden');
-          alert(`SteamCMD Sync complete! Found ${data.totalImported} game licenses owned by your account.`);
+          alert(`SteamCMD Sync complete! Found ${data.totalImported} game licenses owned by ${username} (${data.newlyAdded} newly added).`);
           fetchLibrary();
         } else {
           alert(`SteamCMD Sync failed:\n${data.error}`);
         }
       } else {
+        // Method 4: Steam Web API / Profile Sync
         const identifier = syncIdentifier.value.trim();
         if (!identifier) {
-          alert('Please enter your Steam username, vanity URL, or SteamID64.');
-          btnSubmitSync.disabled = false;
-          btnSubmitSync.textContent = 'Sync Games';
+          alert('Please enter your 17-digit SteamID64 or Custom URL.');
           return;
         }
 
@@ -403,14 +495,14 @@ document.addEventListener('DOMContentLoaded', () => {
           alert(`Sync complete! Found ${data.totalImported} games (${data.newlyAdded} newly added to your library).`);
           fetchLibrary();
         } else {
-          alert(`Sync failed:\n${data.error}`);
+          alert(`Sync failed:\n\n${data.error}`);
         }
       }
     } catch (err) {
       alert(`Sync failed: ${err.message}`);
     } finally {
       btnSubmitSync.disabled = false;
-      btnSubmitSync.textContent = 'Sync Games';
+      btnSubmitSync.textContent = oldText;
     }
   });
 

@@ -336,6 +336,35 @@ body {
   box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
 }
 
+.btn-secondary {
+  background-color: #334155;
+  border-color: #334155;
+  color: #fff;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: #475569;
+}
+
+.btn-toggle {
+  background-color: #1e293b;
+  border-color: var(--border-color);
+  color: var(--text-muted);
+  transition: all 0.2s ease;
+}
+
+.btn-toggle.active {
+  background-color: var(--accent-green);
+  border-color: var(--accent-green);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.3);
+}
+
+.btn-toggle:not(.active):hover:not(:disabled) {
+  background-color: #2a3b53;
+  border-color: var(--accent-cyan);
+}
+
 .btn-accent {
   background: linear-gradient(135deg, var(--accent-purple), var(--accent-pink));
   border: none;

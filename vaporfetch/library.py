@@ -651,9 +651,11 @@ def populate_and_cache_games(app_ids: Set[int]) -> List[Dict[str, Any]]:
         resolver.update_from_steam_api()
 
     games = []
+    filtered_out = []
     for aid in sorted(app_ids):
         name = resolver.resolve_name(aid)
         if is_tool_or_non_game(aid, name):
+            filtered_out.append((aid, name))
             continue
         status_info = check_backup_status(name, aid)
         games.append({
@@ -665,6 +667,10 @@ def populate_and_cache_games(app_ids: Set[int]) -> List[Dict[str, Any]]:
             "backup_size_bytes": status_info["size_bytes"],
             "is_tool": False,
         })
+
+    # Log summary of what was filtered
+    if filtered_out:
+        print(f"[VaporFetch] Filtered out {len(filtered_out)} non-game items: {', '.join(f'{aid}:{name}' for aid, name in filtered_out[:10])}" + ("..." if len(filtered_out) > 10 else ""))
 
     # Save to cache
     safe_write_json(LIBRARY_CACHE_FILE, games)

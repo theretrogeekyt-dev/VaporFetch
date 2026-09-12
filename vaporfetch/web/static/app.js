@@ -7,6 +7,7 @@ document.addEventListener("DOMContentLoaded", () => {
     queueState: null,
     settings: {},
     eventSource: null,
+    gamesOnlyFilter: true,  // True = show only games, False = show all items including DLCs/tools
   };
 
   // DOM Elements
@@ -27,6 +28,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Library Tab
     searchInput: document.getElementById("searchInput"),
+    filterGamesOnlyBtn: document.getElementById("filterGamesOnlyBtn"),
     filterStatus: document.getElementById("filterStatus"),
     platformSelect: document.getElementById("platformSelect"),
     selectAllBtn: document.getElementById("selectAllBtn"),
@@ -643,6 +645,21 @@ document.addEventListener("DOMContentLoaded", () => {
   function initLibraryControls() {
     elements.searchInput.addEventListener("input", renderGames);
     elements.filterStatus.addEventListener("change", renderGames);
+    
+    elements.filterGamesOnlyBtn.addEventListener("click", () => {
+      state.gamesOnlyFilter = !state.gamesOnlyFilter;
+      if (state.gamesOnlyFilter) {
+        elements.filterGamesOnlyBtn.classList.add("active");
+        elements.filterGamesOnlyBtn.textContent = "🎮 Games Only";
+      } else {
+        elements.filterGamesOnlyBtn.classList.remove("active");
+        elements.filterGamesOnlyBtn.textContent = "📦 All Items (incl. DLCs)";
+      }
+      // Reset selection when filter changes
+      state.selectedAppIds.clear();
+      updateSelectedCount();
+      renderGames();
+    });
 
     elements.selectAllBtn.addEventListener("click", () => {
       const filtered = getFilteredGames();
@@ -748,7 +765,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // DLC detection
-    const dlcRegex = /\b(dlc|expansion pack|expansion pass|season pass|annual pass|battle pass|soundtrack|artbook|art book|digital artbook|digital art book|bonus content|skin pack|character pack|costume pack|item pack|weapon pack|content pack|asset pack|upgrade pack|map pack|voice pack|audio pack|music pack|supporter pack|founder pack|founders pack|pre-order bonus|pre-purchase bonus)\b/i;
+    const dlcRegex = /\b(dlc|expansion pack|expansion pass|season pass|annual pass|battle pass|soundtrack|ost|artbook|art book|digital artbook|digital art book|bonus content|bonus pack|skin pack|character pack|costume pack|item pack|weapon pack|content pack|asset pack|upgrade pack|map pack|voice pack|audio pack|music pack|supporter pack|founder pack|founders pack|pre-order bonus|pre-purchase bonus|special content|making of|concept art|behind the scenes|digital content|exclusive content|cosmetic|cosmetics|bundle)\b/i;
     if (dlcRegex.test(lower)) return true;
     if (
       lower.endsWith(" dlc") ||
@@ -888,6 +905,10 @@ document.addEventListener("DOMContentLoaded", () => {
       return true;
     }
 
+    // Videos, movies, music, and media content
+    const mediaRegex = /\b(video|movie|film|documentary|animation|music video|short film|live action|cinematics?|movie pack|video collection|music album|concert|live performance)\b/i;
+    if (mediaRegex.test(lower)) return true;
+
     return false;
   }
 
@@ -906,7 +927,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!res.ok) throw new Error("Failed to load library");
 
       const data = await res.json();
-      state.games = (data.games || []).filter((g) => !isClientNonGame(g));
+      state.games = data.games || [];
       elements.libraryCountBadge.textContent = state.games.length;
 
       lastSyncError = data.error || "";
@@ -979,7 +1000,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const statusFilter = elements.filterStatus.value;
 
     return state.games.filter((game) => {
-      if (isClientNonGame(game)) return false;
+      // Apply games-only filter based on toggle
+      if (state.gamesOnlyFilter && isClientNonGame(game)) return false;
 
       const matchesSearch =
         game.name.toLowerCase().includes(query) || String(game.appid).includes(query);

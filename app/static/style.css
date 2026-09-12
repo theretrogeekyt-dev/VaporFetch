@@ -1178,3 +1178,126 @@ body {
   to { transform: translateY(0); opacity: 1; }
 }
 
+/* One-Time Setup Banner & Password Prompt Styles */
+.setup-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(217, 119, 6, 0.1) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: var(--radius-md);
+  padding: 12px 18px;
+  margin-bottom: 20px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.setup-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: #fde68a;
+}
+
+.setup-banner-icon {
+  font-size: 20px;
+}
+
+.verified-header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.verified-badge-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--accent-green);
+  border: 2px solid var(--accent-green);
+  font-size: 26px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 12px;
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.35);
+}
+
+.verified-header h2 {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 4px;
+}
+
+.verified-header p {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.one-time-info-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #bae6fd;
+  margin-bottom: 20px;
+  text-align: left;
+}
+
+.one-time-info-box .info-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--accent-blue);
+  margin-top: 2px;
+}
+
+.pwd-input-group {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.pwd-input-group input {
+  width: 100%;
+  padding: 10px 42px 10px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  font-size: 14px;
+  outline: none;
+}
+
+.pwd-input-group input:focus {
+  border-color: var(--border-focus);
+}
+
+.pwd-toggle-btn {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px;
+  line-height: 1;
+}
+
+.pwd-toggle-btn:hover {
+  color: var(--text-main);
+}
+
+.w-100 {
+  width: 100%;
+}
+

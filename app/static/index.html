@@ -75,6 +75,18 @@
   <!-- Main Container -->
   <main class="main-content">
 
+    <!-- One-Time Setup Incomplete Alert Banner -->
+    <div id="setupBanner" class="setup-banner" style="display: none;">
+      <div class="setup-banner-left">
+        <span class="setup-banner-icon">⚡</span>
+        <div>
+          <strong>One-Time Setup:</strong>
+          <span>Steam password is required for SteamCMD to batch-download commercial games.</span>
+        </div>
+      </div>
+      <button class="btn btn-sm btn-primary" onclick="openPasswordSetupModal()">Enter Password</button>
+    </div>
+
     <!-- View 1: Game Library View -->
     <section id="libraryView" class="view-panel active">
       <!-- Library Toolbar -->
@@ -235,46 +247,84 @@
     </div>
   </aside>
 
-  <!-- Steam Guard QR Code Modal -->
+  <!-- Steam Guard QR Code Modal & Password Prompt -->
   <div id="qrModal" class="modal-backdrop" style="display: none;">
     <div class="modal-card qr-card">
       <button class="modal-close" onclick="closeQrModal()">&times;</button>
       
-      <div class="qr-header">
-        <div class="steam-logo-badge">
-          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12c0 4.84 3.44 8.87 8 9.8V15.2l-2.4-1.2v-.03c-.34-.17-.6-.46-.73-.83L2.24 11.2C2.08 11.46 2 11.72 2 12c0 5.52 4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm3.3 14.1c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+      <!-- Stage 1: QR Scan -->
+      <div id="qrScanSection">
+        <div class="qr-header">
+          <div class="steam-logo-badge">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12c0 4.84 3.44 8.87 8 9.8V15.2l-2.4-1.2v-.03c-.34-.17-.6-.46-.73-.83L2.24 11.2C2.08 11.46 2 11.72 2 12c0 5.52 4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm3.3 14.1c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+          </div>
+          <h2>Steam Guard QR Sign-in</h2>
+          <p>Scan once using the official Steam Mobile app.</p>
         </div>
-        <h2>Steam Guard QR Sign-in</h2>
-        <p>No password needed. Scan using the official Steam Mobile app.</p>
-      </div>
 
-      <div class="qr-box-wrapper">
-        <div id="qrLoading" class="qr-spinner-box">
-          <div class="spinner"></div>
-          <p>Generating Steam Guard challenge...</p>
+        <div class="qr-box-wrapper">
+          <div id="qrLoading" class="qr-spinner-box">
+            <div class="spinner"></div>
+            <p>Generating Steam Guard challenge...</p>
+          </div>
+          <div id="qrImageContainer" class="qr-img-box" style="display: none;">
+            <img id="qrCodeImg" src="" alt="Steam Guard QR Code">
+            <div class="qr-scanner-line"></div>
+          </div>
         </div>
-        <div id="qrImageContainer" class="qr-img-box" style="display: none;">
-          <img id="qrCodeImg" src="" alt="Steam Guard QR Code">
-          <div class="qr-scanner-line"></div>
+
+        <div class="qr-instructions">
+          <ol>
+            <li>Open your <strong>Steam Mobile app</strong></li>
+            <li>Tap the <strong>Steam Guard</strong> icon (or scan button)</li>
+            <li>Scan the QR code above and approve on your phone</li>
+          </ol>
+        </div>
+
+        <div class="qr-status-indicator">
+          <span class="pulse-dot"></span>
+          <span id="qrStatusText">Waiting for Steam Mobile approval...</span>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-secondary btn-sm" onclick="startQrSession()">Refresh QR Code</button>
         </div>
       </div>
 
-      <div class="qr-instructions">
-        <ol>
-          <li>Open your <strong>Steam Mobile app</strong></li>
-          <li>Tap the <strong>Steam Guard</strong> icon (or scan button)</li>
-          <li>Scan the QR code above and approve on your phone</li>
-        </ol>
+      <!-- Stage 2: Prompt Password After Approval -->
+      <div id="qrPasswordSection" style="display: none;">
+        <div class="verified-header">
+          <div class="verified-badge-icon">✓</div>
+          <h2>Steam Guard Approved!</h2>
+          <p>Signed in as <strong id="verifiedUsername" class="text-accent">Steam User</strong></p>
+        </div>
+
+        <div class="one-time-info-box">
+          <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          <div>
+            <strong>One-Time Setup:</strong> Enter your Steam password below. VaporFetch saves it to your NAS persistent storage so SteamCMD can batch-download your games automatically without asking again.
+          </div>
+        </div>
+
+        <form id="oneTimePasswordForm" onsubmit="submitOneTimePassword(event)">
+          <div class="form-group" style="text-align: left;">
+            <label for="oneTimePasswordInput">Steam Account Password</label>
+            <div class="pwd-input-group">
+              <input type="password" id="oneTimePasswordInput" placeholder="Enter Steam password" required autocomplete="current-password">
+              <button type="button" class="pwd-toggle-btn" onclick="togglePasswordVisibility('oneTimePasswordInput')">👁</button>
+            </div>
+            <small class="form-hint">Stored securely on your NAS in <code>/app/data/settings.json</code>.</small>
+          </div>
+
+          <div class="modal-actions" style="margin-top: 24px; justify-content: space-between;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="skipPasswordSetup()">Skip for now</button>
+            <button type="submit" class="btn btn-primary" id="savePasswordBtn">
+              Save Password & Open Library
+            </button>
+          </div>
+        </form>
       </div>
 
-      <div class="qr-status-indicator">
-        <span class="pulse-dot"></span>
-        <span id="qrStatusText">Waiting for Steam Mobile approval...</span>
-      </div>
-
-      <div class="modal-footer">
-        <button class="btn btn-secondary btn-sm" onclick="startQrSession()">Refresh QR Code</button>
-      </div>
     </div>
   </div>
 

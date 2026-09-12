@@ -165,6 +165,37 @@ class SteamAuthManager:
             "had_remote_interaction": had_remote_interaction,
         }
 
+    async def refresh_access_token(self) -> Optional[str]:
+        """Uses the persisted refresh_token to obtain a new access_token without user interaction."""
+        if not self._current_session or not self._current_session.get("refresh_token"):
+            return None
+
+        refresh_token = self._current_session.get("refresh_token")
+        steamid = self._current_session.get("steamid", "")
+
+        url = f"{STEAM_AUTH_API_BASE}/GenerateAccessTokenForApp/v1"
+        data = {
+            "refresh_token": refresh_token,
+            "steamid": steamid,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.post(url, data=data)
+                if res.status_code == 200:
+                    payload = res.json().get("response", {})
+                    new_token = payload.get("access_token")
+                    if new_token:
+                        self._current_session["access_token"] = new_token
+                        if payload.get("refresh_token"):
+                            self._current_session["refresh_token"] = payload.get("refresh_token")
+                        self._save_persisted_session()
+                        print("[Auth] Successfully refreshed Steam access token.")
+                        return new_token
+        except Exception as e:
+            print(f"[Auth] Could not refresh access token: {e}")
+        return None
+
 
 auth_manager = SteamAuthManager()
 

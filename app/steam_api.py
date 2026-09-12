@@ -1,6 +1,7 @@
+import json
 import httpx
 from typing import List, Dict, Any, Optional
-from app.config import load_settings
+from app.config import load_settings, DATA_DIR
 
 STEAM_API_BASE = "https://api.steampowered.com"
 
@@ -108,7 +109,26 @@ class SteamApiClient:
 
         # Sort alphabetically by default
         formatted_games.sort(key=lambda x: x["name"].lower())
+
+        # Save to local cache for instant offline/one-time persistence
+        try:
+            cache_file = DATA_DIR / "games_cache.json"
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(formatted_games, f)
+        except Exception:
+            pass
+
         return formatted_games
+
+    def get_cached_games(self) -> List[Dict[str, Any]]:
+        cache_file = DATA_DIR / "games_cache.json"
+        if cache_file.exists():
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return []
 
 
 steam_api_client = SteamApiClient()

@@ -95,6 +95,15 @@ async function checkAuthSession() {
     if (data.authenticated && data.session) {
       currentUser = data.session;
       renderUserProfile(currentUser);
+
+      // Check if one-time password setup is complete
+      const banner = document.getElementById("setupBanner");
+      if (!data.has_password) {
+        if (banner) banner.style.display = "flex";
+      } else {
+        if (banner) banner.style.display = "none";
+      }
+
       loadLibrary();
     } else {
       currentUser = null;
@@ -128,6 +137,8 @@ function renderUnauthenticated() {
   document.getElementById("authPromptPlaceholder").style.display = "block";
   document.getElementById("libraryLoading").style.display = "none";
   document.getElementById("libraryEmpty").style.display = "none";
+  const banner = document.getElementById("setupBanner");
+  if (banner) banner.style.display = "none";
 }
 
 async function logout() {
@@ -148,7 +159,23 @@ async function logout() {
 // QR Code Authentication Modal & Polling
 function openQrModal() {
   document.getElementById("qrModal").style.display = "flex";
+  document.getElementById("qrScanSection").style.display = "block";
+  document.getElementById("qrPasswordSection").style.display = "none";
   startQrSession();
+}
+
+function openPasswordSetupModal() {
+  document.getElementById("qrModal").style.display = "flex";
+  document.getElementById("qrScanSection").style.display = "none";
+  document.getElementById("qrPasswordSection").style.display = "block";
+  if (currentUser) {
+    document.getElementById("verifiedUsername").textContent = currentUser.personaname || currentUser.account_name || "Steam User";
+  }
+  const pwdInput = document.getElementById("oneTimePasswordInput");
+  if (pwdInput) {
+    pwdInput.value = "";
+    pwdInput.focus();
+  }
 }
 
 function closeQrModal() {
@@ -164,6 +191,9 @@ async function startQrSession() {
   const container = document.getElementById("qrImageContainer");
   const img = document.getElementById("qrCodeImg");
   const statusText = document.getElementById("qrStatusText");
+
+  document.getElementById("qrScanSection").style.display = "block";
+  document.getElementById("qrPasswordSection").style.display = "none";
 
   loading.style.display = "block";
   container.style.display = "none";
@@ -211,16 +241,84 @@ async function pollQrStatus(clientId, requestId) {
     if (data.status === "confirmed") {
       clearInterval(qrPollTimer);
       qrPollTimer = null;
-      document.getElementById("qrStatusText").textContent = "Login confirmed! Loading library...";
-      showToast("Steam Guard authentication successful!");
-      closeQrModal();
-      checkAuthSession();
+
+      const session = data.session || {};
+      currentUser = session;
+      renderUserProfile(session);
+
+      // Transition to Stage 2: Prompt Password
+      document.getElementById("verifiedUsername").textContent = session.personaname || session.account_name || "Steam User";
+      document.getElementById("qrScanSection").style.display = "none";
+      document.getElementById("qrPasswordSection").style.display = "block";
+
+      const pwdInput = document.getElementById("oneTimePasswordInput");
+      if (pwdInput) {
+        pwdInput.value = "";
+        pwdInput.focus();
+      }
+
+      showToast("Steam Guard verified! Enter your password to finish setup.");
     } else if (data.had_remote_interaction) {
       document.getElementById("qrStatusText").textContent = "Approval prompt displayed on phone...";
     }
   } catch (e) {
     console.warn("Poll status failed:", e);
   }
+}
+
+async function submitOneTimePassword(event) {
+  event.preventDefault();
+  const pwdInput = document.getElementById("oneTimePasswordInput");
+  const password = pwdInput ? pwdInput.value.trim() : "";
+  if (!password) return;
+
+  const btn = document.getElementById("savePasswordBtn");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Saving...";
+  }
+
+  try {
+    const username = currentUser ? currentUser.account_name : "";
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        steamcmd_password: password,
+        steamcmd_username: username
+      })
+    });
+
+    if (!res.ok) {
+      throw new Error("Failed to save password");
+    }
+
+    closeQrModal();
+    const banner = document.getElementById("setupBanner");
+    if (banner) banner.style.display = "none";
+
+    showToast("One-time setup complete! Ready for batch downloads.");
+    checkAuthSession();
+  } catch (e) {
+    showToast(e.message, true);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Save Password & Open Library";
+    }
+  }
+}
+
+function skipPasswordSetup() {
+  closeQrModal();
+  showToast("Skipped password setup. You can set it anytime in Settings.");
+  checkAuthSession();
+}
+
+function togglePasswordVisibility(inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.type = input.type === "password" ? "text" : "password";
 }
 
 // ---------------- Game Library ---------------- //

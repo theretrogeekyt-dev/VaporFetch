@@ -95,8 +95,14 @@ async def poll_qr_auth(req: PollRequest):
 @app.get("/api/auth/session")
 async def get_session():
     session = auth_manager.get_session()
+    settings = load_settings()
+    has_password = bool(settings.get("steamcmd_password"))
     if not session:
-        return {"authenticated": False}
+        return {
+            "authenticated": False,
+            "has_password": has_password,
+            "setup_complete": False
+        }
     
     # If persona/avatar not fetched yet, try fetching
     if "personaname" not in session and session.get("steamid"):
@@ -109,7 +115,12 @@ async def get_session():
             auth_manager._current_session = session
             auth_manager._save_persisted_session()
 
-    return {"authenticated": True, "session": session}
+    return {
+        "authenticated": True,
+        "session": session,
+        "has_password": has_password,
+        "setup_complete": bool(session.get("authenticated") and has_password)
+    }
 
 
 @app.post("/api/auth/logout")
@@ -126,15 +137,41 @@ async def get_owned_games():
     if not session or not session.get("steamid"):
         raise HTTPException(status_code=401, detail="User is not authenticated with Steam.")
 
+    steamid = session["steamid"]
+    access_token = session.get("access_token")
+
     try:
         games = await steam_api_client.get_owned_games(
-            steamid=session["steamid"],
-            access_token=session.get("access_token")
+            steamid=steamid,
+            access_token=access_token
         )
         return {"count": len(games), "games": games}
-    except PermissionError as pe:
-        raise HTTPException(status_code=403, detail=str(pe))
+    except PermissionError:
+        # Attempt automatic token refresh
+        new_token = await auth_manager.refresh_access_token()
+        if new_token:
+            try:
+                games = await steam_api_client.get_owned_games(
+                    steamid=steamid,
+                    access_token=new_token
+                )
+                return {"count": len(games), "games": games}
+            except Exception:
+                pass
+
+        # Fallback to local cached games
+        cached = steam_api_client.get_cached_games()
+        if cached:
+            return {"count": len(cached), "games": cached, "cached": True}
+
+        raise HTTPException(
+            status_code=403, 
+            detail="Steam Web API request unauthorized. Please configure a valid Steam Web API Key in Settings or make profile game details public."
+        )
     except Exception as e:
+        cached = steam_api_client.get_cached_games()
+        if cached:
+            return {"count": len(cached), "games": cached, "cached": True}
         raise HTTPException(status_code=500, detail=f"Failed to fetch games library: {str(e)}")
 
 

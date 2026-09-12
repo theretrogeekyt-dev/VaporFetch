@@ -109,6 +109,8 @@ class Downloader extends EventEmitter {
     const password = options.password || process.env.STEAM_PASSWORD || '';
     const steamGuardCode = (options.steamGuardCode || '').trim();
     const validate = options.validate === true || options.validate === 'true';
+    const removeSteamApps = options.removeSteamApps !== false && options.removeSteamApps !== 'false';
+    const renameRedist = options.renameRedist !== false && options.renameRedist !== 'false';
     const platform = (options.platform || 'auto').toLowerCase();
     const beta = (options.beta || '').trim();
     const betaPassword = (options.betaPassword || '').trim();
@@ -134,6 +136,8 @@ class Downloader extends EventEmitter {
       username: isAnonymous ? 'anonymous' : username,
       platform,
       validate,
+      removeSteamApps,
+      renameRedist,
       beta: beta || null,
       startedAt: new Date().toISOString(),
       completedAt: null,
@@ -246,10 +250,19 @@ class Downloader extends EventEmitter {
         return;
       }
 
-      if (code === 0 || code === 7) {
-        // SteamCMD often exits with 7 upon successful +quit
-        if (this.currentJob.progress.percent >= 99 || this.status === 'validating' || this.status === 'downloading') {
+      if (code === 0 || code === 7 || this.status === 'completed' || this.currentJob.progress.percent >= 99) {
+        // SteamCMD successful completion
+        if (this.currentJob.progress.percent >= 99 || this.status === 'validating' || this.status === 'downloading' || this.status === 'completed') {
           this.currentJob.progress.percent = 100;
+          this.currentJob.progress.stage = 'Post-Processing';
+          this.emit('status', this.getStatus());
+
+          // Clean steamapps folder and rename redist to dependencies
+          this.postProcessDestination(fullInstallPath, {
+            removeSteamApps: this.currentJob.removeSteamApps,
+            renameRedist: this.currentJob.renameRedist
+          });
+
           this.currentJob.progress.stage = 'Completed';
           this.status = 'completed';
           this.appendLog(`[VaporFetch] Download completed successfully for AppID ${appId}!`, 'system');
@@ -405,6 +418,102 @@ class Downloader extends EventEmitter {
       return { success: true, message: 'Cancellation signal sent.' };
     } catch (err) {
       return { success: false, message: err.message };
+    }
+  }
+
+  postProcessDestination(installDir, { removeSteamApps, renameRedist }) {
+    if (!fs.existsSync(installDir)) return;
+
+    this.appendLog(`[VaporFetch] Running post-download cleanup on: ${installDir}`, 'system');
+
+    // 1. Remove steamapps folder (and flatten common/<game> if SteamCMD put files there)
+    if (removeSteamApps) {
+      const steamAppsDir = path.join(installDir, 'steamapps');
+      if (fs.existsSync(steamAppsDir)) {
+        try {
+          const commonDir = path.join(steamAppsDir, 'common');
+          if (fs.existsSync(commonDir)) {
+            const games = fs.readdirSync(commonDir);
+            for (const game of games) {
+              const gamePath = path.join(commonDir, game);
+              if (fs.statSync(gamePath).isDirectory()) {
+                const files = fs.readdirSync(gamePath);
+                for (const file of files) {
+                  const src = path.join(gamePath, file);
+                  const dest = path.join(installDir, file);
+                  if (!fs.existsSync(dest)) {
+                    fs.renameSync(src, dest);
+                  }
+                }
+              }
+            }
+          }
+          fs.rmSync(steamAppsDir, { recursive: true, force: true });
+          this.appendLog(`[VaporFetch] Successfully removed 'steamapps' folder and manifests from destination.`, 'system');
+        } catch (err) {
+          this.appendLog(`[VaporFetch WARNING] Could not remove steamapps folder: ${err.message}`, 'stderr');
+        }
+      } else {
+        this.appendLog(`[VaporFetch] No 'steamapps' folder found to remove.`, 'system');
+      }
+    }
+
+    // 2. Change redist / _CommonRedist folder to 'dependencies'
+    if (renameRedist) {
+      const redistPatterns = ['_commonredist', 'commonredist', 'redist', '_redist', 'redis'];
+      const renameMatchingDir = (dir) => {
+        try {
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (entry.isDirectory()) {
+              const lower = entry.name.toLowerCase();
+              if (redistPatterns.includes(lower)) {
+                const srcPath = path.join(dir, entry.name);
+                const destPath = path.join(dir, 'dependencies');
+                if (srcPath.toLowerCase() !== destPath.toLowerCase()) {
+                  if (fs.existsSync(destPath)) {
+                    // Merge contents into existing dependencies folder
+                    const innerFiles = fs.readdirSync(srcPath);
+                    for (const f of innerFiles) {
+                      const fSrc = path.join(srcPath, f);
+                      const fDest = path.join(destPath, f);
+                      if (!fs.existsSync(fDest)) {
+                        fs.renameSync(fSrc, fDest);
+                      }
+                    }
+                    fs.rmSync(srcPath, { recursive: true, force: true });
+                  } else {
+                    fs.renameSync(srcPath, destPath);
+                  }
+                  return entry.name;
+                }
+              }
+            }
+          }
+        } catch (e) {}
+        return null;
+      };
+
+      try {
+        let renamed = renameMatchingDir(installDir);
+        if (renamed) {
+          this.appendLog(`[VaporFetch] Successfully renamed '${renamed}' folder to 'dependencies'.`, 'system');
+        } else {
+          // Check 1 level deep inside subdirectories
+          const subs = fs.readdirSync(installDir, { withFileTypes: true });
+          for (const sub of subs) {
+            if (sub.isDirectory() && sub.name !== 'dependencies' && sub.name !== 'steamapps') {
+              const subRenamed = renameMatchingDir(path.join(installDir, sub.name));
+              if (subRenamed) {
+                this.appendLog(`[VaporFetch] Successfully renamed '${sub.name}/${subRenamed}' folder to 'dependencies'.`, 'system');
+                break;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        this.appendLog(`[VaporFetch WARNING] Could not rename redist folder: ${err.message}`, 'stderr');
+      }
     }
   }
 

@@ -214,6 +214,8 @@ document.addEventListener('DOMContentLoaded', () => {
       steamGuardCode: isAnonymous ? '' : formData.get('steamGuardCode'),
       platform: formData.get('platform'),
       validate: !!formData.get('validate'),
+      removeSteamApps: !!formData.get('removeSteamApps'),
+      renameRedist: !!formData.get('renameRedist'),
       beta: formData.get('beta'),
       betaPassword: formData.get('betaPassword')
     };

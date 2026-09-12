@@ -41,6 +41,7 @@ class PollRequest(BaseModel):
 
 class QueueAddRequest(BaseModel):
     games: List[Dict[str, Any]]
+    require_goldberg: Optional[bool] = False
 
 class SettingsUpdateRequest(BaseModel):
     steam_api_key: Optional[str] = None
@@ -187,7 +188,7 @@ async def get_queue():
 async def add_to_queue(req: QueueAddRequest):
     if not req.games:
         raise HTTPException(status_code=400, detail="No games specified.")
-    added = queue_manager.add_to_queue(req.games)
+    added = queue_manager.add_to_queue(req.games, require_goldberg=bool(req.require_goldberg))
     return {"added_count": len(added), "added": [i.model_dump() for i in added]}
 
 

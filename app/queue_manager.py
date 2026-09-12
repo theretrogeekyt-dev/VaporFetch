@@ -30,95 +30,102 @@ def sanitize_filename(name: str) -> str:
     return sanitized or "SteamGame"
 
 
-def post_process_game_directory(install_path: Path, appid: int = 0, log_tail: Optional[List[str]] = None):
+async def post_process_game_directory(
+    install_path: Path, 
+    appid: int = 0, 
+    log_tail: Optional[List[str]] = None,
+    require_goldberg: bool = False
+):
     """
     Cleans up post-download game directory:
     1. Flattens SteamCMD's nested steamapps/common/<Game> structure directly into install_path.
     2. Moves any appmanifest_*.acf into install_path and completely removes the steamapps folder.
     3. Renames any CommonRedist folder (_CommonRedist, CommonRedist, etc.) to 'Redistrutables'.
-    4. Optionally applies Goldberg emulator for DRM-free offline play if enabled in Settings.
+    4. Optionally applies Goldberg emulator for DRM-free offline play (required if require_goldberg=True).
     """
     def log(msg: str):
         if log_tail is not None:
             log_tail.append(f"[PostProcess] {msg}")
 
-    try:
-        # Step 1: Look for steamapps folder (steamapps or steam apps, case-insensitive)
-        steamapps_dirs = [
-            item for item in install_path.iterdir() 
-            if item.is_dir() and item.name.lower() in ("steamapps", "steam apps")
-        ]
+    # Step 1: Look for steamapps folder (steamapps or steam apps, case-insensitive)
+    steamapps_dirs = [
+        item for item in install_path.iterdir() 
+        if item.is_dir() and item.name.lower() in ("steamapps", "steam apps")
+    ]
 
-        for s_dir in steamapps_dirs:
-            common_dir = None
-            for sub in s_dir.iterdir():
-                if sub.is_dir() and sub.name.lower() == "common":
-                    common_dir = sub
-                elif sub.is_file() and sub.name.startswith("appmanifest_"):
-                    # Preserve appmanifest in install_path root
-                    target_manifest = install_path / sub.name
-                    if not target_manifest.exists():
-                        try:
-                            shutil.move(str(sub), str(target_manifest))
-                        except Exception:
-                            pass
+    for s_dir in steamapps_dirs:
+        common_dir = None
+        for sub in s_dir.iterdir():
+            if sub.is_dir() and sub.name.lower() == "common":
+                common_dir = sub
+            elif sub.is_file() and sub.name.startswith("appmanifest_"):
+                # Preserve appmanifest in install_path root
+                target_manifest = install_path / sub.name
+                if not target_manifest.exists():
+                    try:
+                        shutil.move(str(sub), str(target_manifest))
+                    except Exception:
+                        pass
 
-            if common_dir and common_dir.exists():
-                common_entries = list(common_dir.iterdir())
-                if len(common_entries) == 1 and common_entries[0].is_dir():
-                    game_subfolder = common_entries[0]
-                    log(f"Flattening '{game_subfolder.name}' directly into '{install_path.name}'...")
-                    for game_item in list(game_subfolder.iterdir()):
-                        dest = install_path / game_item.name
-                        if dest.exists():
-                            if dest.is_dir():
-                                shutil.rmtree(dest, ignore_errors=True)
-                            else:
-                                dest.unlink(missing_ok=True)
-                        shutil.move(str(game_item), str(dest))
-                else:
-                    for common_item in common_entries:
-                        dest = install_path / common_item.name
-                        if dest.exists():
-                            if dest.is_dir():
-                                shutil.rmtree(dest, ignore_errors=True)
-                            else:
-                                dest.unlink(missing_ok=True)
-                        shutil.move(str(common_item), str(dest))
+        if common_dir and common_dir.exists():
+            common_entries = list(common_dir.iterdir())
+            if len(common_entries) == 1 and common_entries[0].is_dir():
+                game_subfolder = common_entries[0]
+                log(f"Flattening '{game_subfolder.name}' directly into '{install_path.name}'...")
+                for game_item in list(game_subfolder.iterdir()):
+                    dest = install_path / game_item.name
+                    if dest.exists():
+                        if dest.is_dir():
+                            shutil.rmtree(dest, ignore_errors=True)
+                        else:
+                            dest.unlink(missing_ok=True)
+                    shutil.move(str(game_item), str(dest))
+            else:
+                for common_item in common_entries:
+                    dest = install_path / common_item.name
+                    if dest.exists():
+                        if dest.is_dir():
+                            shutil.rmtree(dest, ignore_errors=True)
+                        else:
+                            dest.unlink(missing_ok=True)
+                    shutil.move(str(common_item), str(dest))
 
-            # Remove the steamapps folder completely
-            log(f"Removed '{s_dir.name}' folder.")
-            shutil.rmtree(s_dir, ignore_errors=True)
+        # Remove the steamapps folder completely
+        log(f"Removed '{s_dir.name}' folder.")
+        shutil.rmtree(s_dir, ignore_errors=True)
 
-        # Step 2: Rename any commonredist folder to Redistrutables
-        for root, dirs, files in os.walk(install_path, topdown=False):
-            for d_name in list(dirs):
-                clean = d_name.lower().replace("_", "").replace("-", "").strip()
-                if clean == "commonredist":
-                    src_dir = Path(root) / d_name
-                    dest_dir = Path(root) / "Redistrutables"
-                    if src_dir != dest_dir:
-                        log(f"Renamed '{src_dir.name}' to 'Redistrutables'.")
-                        if dest_dir.exists():
-                            shutil.rmtree(dest_dir, ignore_errors=True)
-                        src_dir.rename(dest_dir)
+    # Step 2: Rename any commonredist folder to Redistrutables
+    for root, dirs, files in os.walk(install_path, topdown=False):
+        for d_name in list(dirs):
+            clean = d_name.lower().replace("_", "").replace("-", "").strip()
+            if clean == "commonredist":
+                src_dir = Path(root) / d_name
+                dest_dir = Path(root) / "Redistrutables"
+                if src_dir != dest_dir:
+                    log(f"Renamed '{src_dir.name}' to 'Redistrutables'.")
+                    if dest_dir.exists():
+                        shutil.rmtree(dest_dir, ignore_errors=True)
+                    src_dir.rename(dest_dir)
 
-        # Step 3: Check if Goldberg offline emulator is enabled in settings
-        settings = load_settings()
-        if settings.get("enable_goldberg", False) and appid > 0:
-            try:
-                from app.goldberg import goldberg_manager
-                status = goldberg_manager.check_status(install_path)
-                if status.get("compatible"):
-                    account_name = settings.get("steamcmd_username") or "Player"
-                    res = goldberg_manager.apply(install_path, appid=appid, account_name=account_name)
-                    log(f"Applied Goldberg offline wrapper ({res['patched_count']} DLLs patched). Original saved to .orig.")
-            except Exception as ge:
-                log(f"Could not apply Goldberg wrapper: {ge}")
-
-    except Exception as e:
-        log(f"Warning during directory cleanup: {e}")
-
+    # Step 3: Check if Goldberg offline emulator is enabled in settings or required for this batch
+    settings = load_settings()
+    should_apply_goldberg = require_goldberg or settings.get("enable_goldberg", False)
+    if should_apply_goldberg and appid > 0:
+        from app.goldberg import goldberg_manager
+        await goldberg_manager.ensure_binaries()
+        status = goldberg_manager.check_status(install_path)
+        if status.get("compatible"):
+            account_name = settings.get("steamcmd_username") or "Player"
+            res = goldberg_manager.apply(install_path, appid=appid, account_name=account_name)
+            req_note = " (Required for batch)" if require_goldberg else ""
+            log(f"Applied Goldberg offline wrapper{req_note} ({res['patched_count']} DLLs patched). Original saved to .orig.")
+        else:
+            if require_goldberg:
+                raise RuntimeError(
+                    f"Goldberg patch was required for this batch, but '{install_path.name}' does not contain steam_api.dll or steam_api64.dll."
+                )
+            else:
+                log("Game does not use standard steam_api.dll; Goldberg wrapper not applied.")
 
 
 class QueueItem(BaseModel):
@@ -134,6 +141,7 @@ class QueueItem(BaseModel):
     step: str = "Queued"
     install_dir: str = ""
     error: Optional[str] = None
+    require_goldberg: bool = False
     created_at: float = Field(default_factory=time.time)
     started_at: Optional[float] = None
     completed_at: Optional[float] = None
@@ -193,7 +201,7 @@ class DownloadQueueManager:
         for dq in dead_queues:
             self._subscribers.discard(dq)
 
-    def add_to_queue(self, games: List[Dict[str, Any]]) -> List[QueueItem]:
+    def add_to_queue(self, games: List[Dict[str, Any]], require_goldberg: bool = False) -> List[QueueItem]:
         """Adds a list of games (appid, name) to the queue."""
         added = []
         for g in games:
@@ -209,7 +217,8 @@ class DownloadQueueManager:
                 appid=appid,
                 name=name,
                 status="queued",
-                step="Queued in batch"
+                step="Queued in batch",
+                require_goldberg=require_goldberg
             )
             self.items.append(item)
             added.append(item)
@@ -403,12 +412,23 @@ class DownloadQueueManager:
 
             if returncode == 0 and not item.error:
                 item.step = "Cleaning structure"
-                post_process_game_directory(install_path, appid=item.appid, log_tail=item.log_tail)
-                item.status = "completed"
-                item.progress = 100.0
-                item.step = "Completed"
-                item.completed_at = time.time()
-                item.log_tail.append(f"App {item.appid} ({item.name}) downloaded and structured successfully in {install_path}.")
+                try:
+                    await post_process_game_directory(
+                        install_path, 
+                        appid=item.appid, 
+                        log_tail=item.log_tail, 
+                        require_goldberg=item.require_goldberg
+                    )
+                    item.status = "completed"
+                    item.progress = 100.0
+                    item.step = "Completed"
+                    item.completed_at = time.time()
+                    item.log_tail.append(f"App {item.appid} ({item.name}) downloaded and structured successfully in {install_path}.")
+                except Exception as ppe:
+                    item.status = "failed"
+                    item.error = str(ppe)
+                    item.step = "Failed (Goldberg Required)" if item.require_goldberg and "Goldberg" in str(ppe) else "Failed (Post-process)"
+                    item.log_tail.append(f"Post-processing failed: {ppe}")
             elif item.status == "cancelled":
                 item.log_tail.append("Process cancelled.")
             else:

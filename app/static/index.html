@@ -177,6 +177,7 @@
             <span class="active-badge animate-pulse">● Downloading</span>
             <h2 id="activeGameTitle" class="active-game-title">Game Title</h2>
             <span id="activeAppId" class="badge badge-subtle">AppID: --</span>
+            <span id="activeGoldbergReqBadge" class="badge badge-goldberg" style="display: none;">Goldberg Required</span>
           </div>
           <div class="active-actions">
             <button class="btn btn-sm btn-outline" onclick="toggleConsole()">
@@ -258,6 +259,10 @@
     <div class="batch-bar-content">
       <span class="batch-text"><strong id="floatingSelectedCount">0</strong> games selected for NAS download</span>
       <div class="batch-bar-btns">
+        <label class="batch-goldberg-toggle" title="Require Goldberg offline emulator compatibility for this batch session only. Fails games that do not have steam_api.dll or steam_api64.dll.">
+          <input type="checkbox" id="batchRequireGoldberg">
+          <span>Require Goldberg Patch</span>
+        </label>
         <button class="btn btn-secondary btn-sm" onclick="deselectAll()">Deselect</button>
         <button class="btn btn-primary" onclick="queueSelectedGames()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>

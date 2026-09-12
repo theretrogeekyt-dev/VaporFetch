@@ -486,6 +486,8 @@ function selectAllFiltered() {
 
 function deselectAll() {
   selectedGames.clear();
+  const reqCheck = document.getElementById("batchRequireGoldberg");
+  if (reqCheck) reqCheck.checked = false;
   renderGames();
 }
 
@@ -510,12 +512,13 @@ function updateSelectionUI() {
 async function queueSelectedGames() {
   if (selectedGames.size === 0) return;
 
+  const requireGoldberg = document.getElementById("batchRequireGoldberg")?.checked || false;
   const gamesToQueue = Array.from(selectedGames.values());
   try {
     const res = await fetch("/api/queue", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ games: gamesToQueue })
+      body: JSON.stringify({ games: gamesToQueue, require_goldberg: requireGoldberg })
     });
 
     if (!res.ok) {
@@ -524,9 +527,9 @@ async function queueSelectedGames() {
     }
 
     const data = await res.json();
-    showToast(`Added ${data.added_count} game(s) to download queue!`);
+    showToast(`Added ${data.added_count} game(s) to download queue!${requireGoldberg ? " (Goldberg Required)" : ""}`);
     
-    // Clear selection
+    // Clear selection & reset toggle
     deselectAll();
     // Switch to queue view to show progress
     switchTab("queue");
@@ -585,6 +588,11 @@ function renderActiveCard(item) {
 
   document.getElementById("activeGameTitle").textContent = item.name;
   document.getElementById("activeAppId").textContent = `AppID: ${item.appid}`;
+  const reqBadge = document.getElementById("activeGoldbergReqBadge");
+  if (reqBadge) {
+    reqBadge.style.display = item.require_goldberg ? "inline-block" : "none";
+  }
+
   document.getElementById("activeProgressBar").style.width = `${item.progress.toFixed(1)}%`;
   document.getElementById("activeProgressPct").textContent = `${item.progress.toFixed(1)}%`;
 
@@ -630,7 +638,10 @@ function renderPendingList(items) {
       <div class="queue-item-info">
         <span class="queue-order-badge">#${idx + 1}</span>
         <div>
-          <div class="queue-item-name">${escapeHtml(item.name)}</div>
+          <div class="queue-item-name">
+            ${escapeHtml(item.name)}
+            ${item.require_goldberg ? '<span class="badge badge-goldberg" style="margin-left: 6px; font-size: 10px;">Goldberg Required</span>' : ''}
+          </div>
           <div class="queue-item-sub">AppID: ${item.appid} &bull; ${item.step}</div>
         </div>
       </div>
@@ -658,8 +669,11 @@ function renderHistoryList(items) {
         <div class="queue-item-info">
           <span style="color: ${statusColor}; font-weight: bold; min-width: 20px;">${icon}</span>
           <div>
-            <div class="queue-item-name">${escapeHtml(item.name)}</div>
-            <div class="queue-item-sub">${item.step} ${item.error ? `&bull; ${escapeHtml(item.error)}` : ''}</div>
+            <div class="queue-item-name">
+              ${escapeHtml(item.name)}
+              ${item.require_goldberg ? '<span class="badge badge-goldberg" style="margin-left: 6px; font-size: 10px;">Goldberg Required</span>' : ''}
+            </div>
+            <div class="queue-item-sub">${item.step} ${item.error ? `&bull; <span style="color: var(--accent-red);">${escapeHtml(item.error)}</span>` : ''}</div>
           </div>
         </div>
         <div style="display:flex; gap: 6px;">

@@ -101,6 +101,12 @@ body {
   color: var(--text-muted);
 }
 
+.badge-goldberg {
+  background: rgba(234, 179, 8, 0.15);
+  color: #facc15;
+  border: 1px solid rgba(234, 179, 8, 0.35);
+}
+
 .nav-tabs {
   display: flex;
   gap: 8px;
@@ -833,7 +839,38 @@ body {
 
 .batch-bar-btns {
   display: flex;
+  align-items: center;
   gap: 10px;
+}
+
+.batch-goldberg-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #e2e8f0;
+  cursor: pointer;
+  padding: 5px 12px;
+  background: rgba(234, 179, 8, 0.1);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+  border-radius: 9999px;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+
+.batch-goldberg-toggle:hover {
+  background: rgba(234, 179, 8, 0.2);
+  border-color: rgba(234, 179, 8, 0.5);
+  color: #fff;
+}
+
+.batch-goldberg-toggle input[type="checkbox"] {
+  accent-color: #eab308;
+  cursor: pointer;
+  width: 15px;
+  height: 15px;
+  margin: 0;
 }
 
 /* ---------------- Modals ---------------- */

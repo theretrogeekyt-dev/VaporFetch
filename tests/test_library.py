@@ -101,6 +101,17 @@ class TestLibrary(unittest.TestCase):
         self.assertTrue(is_tool_or_non_game(1096900, "RPG Maker MZ"))
         self.assertTrue(is_tool_or_non_game(1905180, "OBS Studio"))
 
+        # Test Videos, Movies, and Media Content
+        self.assertTrue(is_tool_or_non_game(999901, "Half-Life 2 Video"))
+        self.assertTrue(is_tool_or_non_game(999902, "Portal 2 Making of - Documentary"))
+        self.assertTrue(is_tool_or_non_game(999903, "DOTA 2 Music Video"))
+        self.assertTrue(is_tool_or_non_game(999904, "Half-Life Cinematic Collection"))
+        self.assertTrue(is_tool_or_non_game(999905, "Valve Documentary Film"))
+        self.assertTrue(is_tool_or_non_game(999906, "Game Trailer Collection"))
+        self.assertTrue(is_tool_or_non_game(999907, "Official Animation Pack"))
+        self.assertTrue(is_tool_or_non_game(999908, "Short Film: Behind the Scenes"))
+        self.assertTrue(is_tool_or_non_game(999909, "Concert Performance - Live"))
+
         # Allowed retail games
         self.assertFalse(is_tool_or_non_game(4000, "Garry's Mod"))
         self.assertFalse(is_tool_or_non_game(362890, "Black Mesa"))

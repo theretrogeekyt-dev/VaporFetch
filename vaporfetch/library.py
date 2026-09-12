@@ -248,10 +248,12 @@ def is_tool_or_non_game(appid: int, name: str, app_type: Optional[str] = None) -
     # 3. DLC Detection (expansion packs, season passes, cosmetics, item packs, soundtracks, artbooks)
     if re.search(
         r"\b(dlc|expansion pack|expansion pass|season pass|annual pass|battle pass|"
-        r"soundtrack|artbook|art book|digital artbook|digital art book|bonus content|"
+        r"soundtrack|ost|artbook|art book|digital artbook|digital art book|bonus content|bonus pack|"
         r"skin pack|character pack|costume pack|item pack|weapon pack|content pack|"
         r"asset pack|upgrade pack|map pack|voice pack|audio pack|music pack|"
-        r"supporter pack|founder pack|founders pack|pre-order bonus|pre-purchase bonus)\b",
+        r"supporter pack|founder pack|founders pack|pre-order bonus|pre-purchase bonus|"
+        r"special content|making of|concept art|behind the scenes|digital content|"
+        r"exclusive content|cosmetic|cosmetics|bundle)\b",
         lower,
     ):
         return True
@@ -301,7 +303,15 @@ def is_tool_or_non_game(appid: int, name: str, app_type: Optional[str] = None) -
     ):
         return True
 
-    # 5. Software & Utility Detection
+    # 5. Videos, Movies, Music, and Media Content
+    if re.search(
+        r"\b(video|movie|film|documentary|animation|music video|short film|live action|"
+        r"cinematics?|movie pack|video collection|music album|concert|live performance)\b",
+        lower,
+    ):
+        return True
+
+    # 5b. Software & Utility Detection
     if re.search(
         r"\b(software|utility|utilities|benchmark|filmmaker|level editor|map editor|world editor|scenario editor)\b",
         lower,

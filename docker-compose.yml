@@ -1,0 +1,24 @@
+services:
+  vaporfetch:
+    build: .
+    image: vaporfetch:latest
+    container_name: vaporfetch
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Match PUID/PGID to your NAS user to avoid permission issues
+      - PUID=1000
+      - PGID=1000
+      - UMASK=002
+      # Optional: Provide your Steam Web API Key (https://steamcommunity.com/dev/apikey)
+      - STEAM_API_KEY=
+      # Default platform: "windows" (recommended for NAS/Proton storage) or "linux"
+      - FORCE_PLATFORM=windows
+    volumes:
+      # Persistent configuration, sessions, and Steam cache
+      - ./data:/app/data
+      # Target download folder on your NAS / Host storage
+      # Replace './downloads' with your actual NAS share path (e.g., /mnt/user/games or /volume1/downloads)
+      - ./downloads:/downloads
+

@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VaporFetch — Steam NAS Batch Downloader</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎮</text></svg>">
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <header class="top-nav">
+    <div class="nav-left">
+      <div class="logo">
+        <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
+          <path d="M2 12h20"/>
+        </svg>
+        <span class="logo-title">VaporFetch</span>
+        <span class="badge badge-nas">NAS</span>
+      </div>
+      
+      <nav class="nav-tabs">
+        <button id="tabLibraryBtn" class="tab-btn active" onclick="switchTab('library')">
+          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Game Library
+        </button>
+        <button id="tabQueueBtn" class="tab-btn" onclick="switchTab('queue')">
+          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download Queue
+          <span id="queueBadge" class="tab-badge" style="display:none;">0</span>
+        </button>
+      </nav>
+    </div>
+
+    <div class="nav-right">
+      <!-- Storage Indicator -->
+      <div class="storage-widget" id="storageWidget" title="Mounted NAS /downloads storage">
+        <div class="storage-info">
+          <span class="storage-label">NAS Storage</span>
+          <span class="storage-val" id="storageText">-- / -- GB</span>
+        </div>
+        <div class="storage-bar-bg">
+          <div class="storage-bar-fill" id="storageFill" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <!-- Settings Button -->
+      <button class="icon-btn" onclick="openSettingsModal()" title="Configuration & Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+
+      <!-- User Profile / Login Area -->
+      <div id="userProfileArea">
+        <button id="loginBtn" class="btn btn-steam" onclick="openQrModal()">
+          <svg class="steam-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12c0 4.84 3.44 8.87 8 9.8V15.2l-2.4-1.2v-.03c-.34-.17-.6-.46-.73-.83L2.24 11.2C2.08 11.46 2 11.72 2 12c0 5.52 4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm3.3 14.1c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+          Steam Guard Login
+        </button>
+        <div id="userCard" class="user-card" style="display: none;">
+          <img id="userAvatar" class="user-avatar" src="" alt="Avatar">
+          <div class="user-details">
+            <span id="userName" class="user-name">Steam User</span>
+            <span id="userId" class="user-id">ID: --</span>
+          </div>
+          <button class="logout-btn" onclick="logout()" title="Log out">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="main-content">
+
+    <!-- View 1: Game Library View -->
+    <section id="libraryView" class="view-panel active">
+      <!-- Library Toolbar -->
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <div class="search-box">
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="searchInput" placeholder="Search games by title or AppID..." oninput="handleSearch()">
+            <button id="clearSearchBtn" class="clear-btn" onclick="clearSearch()" style="display:none;">&times;</button>
+          </div>
+          <div class="sort-box">
+            <label for="sortSelect">Sort:</label>
+            <select id="sortSelect" onchange="handleSort()">
+              <option value="name_asc">Title (A &rarr; Z)</option>
+              <option value="name_desc">Title (Z &rarr; A)</option>
+              <option value="playtime_desc">Most Played</option>
+              <option value="appid_asc">AppID</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="toolbar-right">
+          <button class="btn btn-secondary" onclick="selectAllFiltered()">Select All</button>
+          <button class="btn btn-secondary" onclick="deselectAll()">Deselect All</button>
+          <button id="downloadSelectedBtn" class="btn btn-primary" onclick="queueSelectedGames()" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download Selected (<span id="selectedCount">0</span>)
+          </button>
+        </div>
+      </div>
+
+      <!-- Not Authenticated Placeholder -->
+      <div id="authPromptPlaceholder" class="placeholder-card" style="display:none;">
+        <div class="placeholder-icon">🔑</div>
+        <h2>Steam Authentication Required</h2>
+        <p>Log in using modern Steam Guard QR code authentication to automatically browse and batch-download your games library.</p>
+        <button class="btn btn-steam btn-large" onclick="openQrModal()">
+          <svg class="steam-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12c0 4.84 3.44 8.87 8 9.8V15.2l-2.4-1.2v-.03c-.34-.17-.6-.46-.73-.83L2.24 11.2C2.08 11.46 2 11.72 2 12c0 5.52 4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm3.3 14.1c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+          Scan Steam Guard QR Code
+        </button>
+      </div>
+
+      <!-- Loading State -->
+      <div id="libraryLoading" class="loading-container" style="display: none;">
+        <div class="spinner"></div>
+        <p>Fetching owned games from Steam...</p>
+      </div>
+
+      <!-- Empty / Filter Zero State -->
+      <div id="libraryEmpty" class="placeholder-card" style="display: none;">
+        <div class="placeholder-icon">🔍</div>
+        <h2>No games found</h2>
+        <p>Try adjusting your search filter.</p>
+      </div>
+
+      <!-- Game Cards Grid -->
+      <div id="gamesGrid" class="games-grid"></div>
+    </section>
+
+
+    <!-- View 2: Download Queue View -->
+    <section id="queueView" class="view-panel">
+      
+      <!-- Active Download Card -->
+      <div id="activeDownloadSection" class="active-download-card" style="display: none;">
+        <div class="active-card-header">
+          <div class="active-title-group">
+            <span class="active-badge animate-pulse">● Downloading</span>
+            <h2 id="activeGameTitle" class="active-game-title">Game Title</h2>
+            <span id="activeAppId" class="badge badge-subtle">AppID: --</span>
+          </div>
+          <div class="active-actions">
+            <button class="btn btn-sm btn-outline" onclick="toggleConsole()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              <span id="consoleToggleText">Show SteamCMD Log</span>
+            </button>
+            <button class="btn btn-sm btn-danger" onclick="cancelActiveDownload()">Cancel</button>
+          </div>
+        </div>
+
+        <div class="active-progress-container">
+          <div class="progress-bar-bg">
+            <div id="activeProgressBar" class="progress-bar-fill" style="width: 0%"></div>
+          </div>
+          <div class="progress-stats">
+            <div class="stat-item">
+              <span class="stat-label">Progress</span>
+              <span id="activeProgressPct" class="stat-value">0.0%</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">Downloaded</span>
+              <span id="activeBytes" class="stat-value">0 MB / 0 MB</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">Speed</span>
+              <span id="activeSpeed" class="stat-value">0 MB/s</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">ETA</span>
+              <span id="activeEta" class="stat-value">--</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">Phase</span>
+              <span id="activeStep" class="stat-value text-accent">Initializing</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Collapsible SteamCMD Raw Terminal Console -->
+        <div id="consoleWrapper" class="console-wrapper" style="display: none;">
+          <div class="console-header">
+            <span>SteamCMD Live Terminal Stream</span>
+            <button class="console-copy-btn" onclick="copyConsoleLogs()">Copy Logs</button>
+          </div>
+          <pre id="consoleOutput" class="console-output"></pre>
+        </div>
+      </div>
+
+      <!-- Queue List & Controls -->
+      <div class="queue-layout">
+        <!-- Upcoming Queue -->
+        <div class="queue-column">
+          <div class="section-header">
+            <h3>Pending Queue (<span id="pendingCount">0</span>)</h3>
+          </div>
+          <div id="pendingList" class="queue-list">
+            <p class="empty-hint">No downloads pending. Select games from the Library to batch-download.</p>
+          </div>
+        </div>
+
+        <!-- History / Completed Queue -->
+        <div class="queue-column">
+          <div class="section-header">
+            <h3>History (<span id="historyCount">0</span>)</h3>
+            <button class="btn btn-xs btn-outline" onclick="clearCompletedQueue()">Clear History</button>
+          </div>
+          <div id="historyList" class="queue-list">
+            <p class="empty-hint">No completed downloads yet.</p>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- Sticky Floating Action Bar for Batch Downloading -->
+  <aside id="batchActionBar" class="batch-bar" style="display: none;">
+    <div class="batch-bar-content">
+      <span class="batch-text"><strong id="floatingSelectedCount">0</strong> games selected for NAS download</span>
+      <div class="batch-bar-btns">
+        <button class="btn btn-secondary btn-sm" onclick="deselectAll()">Deselect</button>
+        <button class="btn btn-primary" onclick="queueSelectedGames()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Batch Download to NAS
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Steam Guard QR Code Modal -->
+  <div id="qrModal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card qr-card">
+      <button class="modal-close" onclick="closeQrModal()">&times;</button>
+      
+      <div class="qr-header">
+        <div class="steam-logo-badge">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12c0 4.84 3.44 8.87 8 9.8V15.2l-2.4-1.2v-.03c-.34-.17-.6-.46-.73-.83L2.24 11.2C2.08 11.46 2 11.72 2 12c0 5.52 4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm3.3 14.1c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+        </div>
+        <h2>Steam Guard QR Sign-in</h2>
+        <p>No password needed. Scan using the official Steam Mobile app.</p>
+      </div>
+
+      <div class="qr-box-wrapper">
+        <div id="qrLoading" class="qr-spinner-box">
+          <div class="spinner"></div>
+          <p>Generating Steam Guard challenge...</p>
+        </div>
+        <div id="qrImageContainer" class="qr-img-box" style="display: none;">
+          <img id="qrCodeImg" src="" alt="Steam Guard QR Code">
+          <div class="qr-scanner-line"></div>
+        </div>
+      </div>
+
+      <div class="qr-instructions">
+        <ol>
+          <li>Open your <strong>Steam Mobile app</strong></li>
+          <li>Tap the <strong>Steam Guard</strong> icon (or scan button)</li>
+          <li>Scan the QR code above and approve on your phone</li>
+        </ol>
+      </div>
+
+      <div class="qr-status-indicator">
+        <span class="pulse-dot"></span>
+        <span id="qrStatusText">Waiting for Steam Mobile approval...</span>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" onclick="startQrSession()">Refresh QR Code</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings & Configuration Modal -->
+  <div id="settingsModal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card">
+      <button class="modal-close" onclick="closeSettingsModal()">&times;</button>
+      
+      <div class="modal-header">
+        <h2>VaporFetch Settings</h2>
+        <p>Configure Steam credentials, target platform, and NAS storage.</p>
+      </div>
+
+      <form id="settingsForm" onsubmit="saveSettings(event)">
+        <div class="form-group">
+          <label for="cfgApiKey">Steam Web API Key (Optional / Recommended)</label>
+          <input type="text" id="cfgApiKey" placeholder="e.g. 32-character hexadecimal key">
+          <small class="form-hint">
+            Required if your Steam profile games list is set to Friends-Only or Private. 
+            <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">Get an API key here</a>.
+          </small>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="cfgPlatform">Target Game Platform</label>
+            <select id="cfgPlatform">
+              <option value="windows">Windows (Default - Recommended for NAS/Proton)</option>
+              <option value="linux">Linux (Native Linux depots)</option>
+              <option value="macos">macOS</option>
+            </select>
+            <small class="form-hint">Forces SteamCMD to download Windows depots even when running on Linux.</small>
+          </div>
+
+          <div class="form-group">
+            <label for="cfgValidate">Validation</label>
+            <div class="checkbox-row">
+              <input type="checkbox" id="cfgValidate" checked>
+              <label for="cfgValidate">Validate files after download (<code>validate</code>)</label>
+            </div>
+            <small class="form-hint">Checks hash integrity of all downloaded game files.</small>
+          </div>
+        </div>
+
+        <div class="form-divider">
+          <span>SteamCMD Account Setup (For Commercial Games)</span>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="cfgUsername">Steam Username</label>
+            <input type="text" id="cfgUsername" placeholder="Auto-filled on QR login">
+          </div>
+          <div class="form-group">
+            <label for="cfgPassword">Steam Password</label>
+            <input type="password" id="cfgPassword" placeholder="Stored securely in container">
+          </div>
+        </div>
+        <small class="form-hint">
+          Commercial games require a licensed account in SteamCMD. Free dedicated servers/tools download anonymously.
+        </small>
+
+        <div class="form-group" style="margin-top: 12px;">
+          <label for="cfgCustomArgs">Custom SteamCMD Extra Arguments</label>
+          <input type="text" id="cfgCustomArgs" placeholder="Optional extra parameters (e.g. +set_steam_guard_code ...)">
+        </div>
+
+        <div class="system-info-box">
+          <h4>Container & NAS Environment</h4>
+          <div class="sys-info-grid">
+            <div><strong>PUID:</strong> <span id="sysPuid">--</span></div>
+            <div><strong>PGID:</strong> <span id="sysPgid">--</span></div>
+            <div><strong>Download Dir:</strong> <span id="sysDownDir">/downloads</span></div>
+            <div><strong>Data Dir:</strong> <span id="sysDataDir">/app/data</span></div>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeSettingsModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Settings</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,278 @@
+import os
+import shutil
+import asyncio
+from pathlib import Path
+from contextlib import asynccontextmanager
+from typing import List, Dict, Any, Optional
+
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+from app.config import (
+    DOWNLOAD_DIR,
+    DATA_DIR,
+    STEAMCMD_BIN,
+    load_settings,
+    save_settings
+)
+from app.auth import auth_manager
+from app.steam_api import steam_api_client
+from app.queue_manager import queue_manager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Resume any pending downloads on startup
+    queue_manager.start_worker()
+    yield
+
+app = FastAPI(title="VaporFetch", version="1.0.0", lifespan=lifespan)
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+# Pydantic Request Models
+class PollRequest(BaseModel):
+    client_id: str
+    request_id: str
+
+class QueueAddRequest(BaseModel):
+    games: List[Dict[str, Any]]
+
+class SettingsUpdateRequest(BaseModel):
+    steam_api_key: Optional[str] = None
+    force_platform: Optional[str] = None
+    validate_downloads: Optional[bool] = None
+    steamcmd_username: Optional[str] = None
+    steamcmd_password: Optional[str] = None
+    custom_steamcmd_args: Optional[str] = None
+
+
+@app.get("/", response_class=HTMLResponse)
+async def serve_index():
+    index_file = STATIC_DIR / "index.html"
+    if index_file.exists():
+        return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>VaporFetch is initializing...</h1>")
+
+
+# ---------------- Auth Endpoints ---------------- #
+
+@app.post("/api/auth/qr/begin")
+async def begin_qr_auth():
+    try:
+        data = await auth_manager.begin_qr_auth()
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to begin QR auth session: {str(e)}")
+
+
+@app.post("/api/auth/qr/poll")
+async def poll_qr_auth(req: PollRequest):
+    try:
+        result = await auth_manager.poll_qr_auth(req.client_id, req.request_id)
+        if result.get("status") == "confirmed":
+            # Fetch profile details (avatar, persona name)
+            session = result.get("session", {})
+            steamid = session.get("steamid")
+            if steamid:
+                profile = await steam_api_client.get_player_summary(
+                    steamid=steamid,
+                    access_token=session.get("access_token")
+                )
+                if profile:
+                    session.update(profile)
+                    auth_manager._current_session = session
+                    auth_manager._save_persisted_session()
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Polling QR auth failed: {str(e)}")
+
+
+@app.get("/api/auth/session")
+async def get_session():
+    session = auth_manager.get_session()
+    if not session:
+        return {"authenticated": False}
+    
+    # If persona/avatar not fetched yet, try fetching
+    if "personaname" not in session and session.get("steamid"):
+        profile = await steam_api_client.get_player_summary(
+            steamid=session["steamid"],
+            access_token=session.get("access_token")
+        )
+        if profile:
+            session.update(profile)
+            auth_manager._current_session = session
+            auth_manager._save_persisted_session()
+
+    return {"authenticated": True, "session": session}
+
+
+@app.post("/api/auth/logout")
+async def logout():
+    auth_manager.logout()
+    return {"success": True}
+
+
+# ---------------- Game Library Endpoints ---------------- #
+
+@app.get("/api/games")
+async def get_owned_games():
+    session = auth_manager.get_session()
+    if not session or not session.get("steamid"):
+        raise HTTPException(status_code=401, detail="User is not authenticated with Steam.")
+
+    try:
+        games = await steam_api_client.get_owned_games(
+            steamid=session["steamid"],
+            access_token=session.get("access_token")
+        )
+        return {"count": len(games), "games": games}
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch games library: {str(e)}")
+
+
+# ---------------- Queue & Downloader Endpoints ---------------- #
+
+@app.get("/api/queue")
+async def get_queue():
+    return queue_manager.get_summary()
+
+
+@app.post("/api/queue")
+async def add_to_queue(req: QueueAddRequest):
+    if not req.games:
+        raise HTTPException(status_code=400, detail="No games specified.")
+    added = queue_manager.add_to_queue(req.games)
+    return {"added_count": len(added), "added": [i.model_dump() for i in added]}
+
+
+@app.delete("/api/queue/{item_id}")
+async def delete_queue_item(item_id: str):
+    removed = queue_manager.remove_from_queue(item_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Item not found in queue.")
+    return {"success": True}
+
+
+@app.post("/api/queue/{item_id}/retry")
+async def retry_queue_item(item_id: str):
+    retried = queue_manager.retry_item(item_id)
+    if not retried:
+        raise HTTPException(status_code=404, detail="Item not found or cannot be retried.")
+    return {"success": True}
+
+
+@app.post("/api/queue/clear-completed")
+async def clear_completed_queue():
+    queue_manager.clear_completed()
+    return {"success": True}
+
+
+@app.get("/api/queue/stream")
+async def stream_queue(request: Request):
+    """Server-Sent Events (SSE) endpoint providing live download progress and console logs."""
+    sub_queue = await queue_manager.subscribe()
+
+    async def event_generator():
+        try:
+            # First send current queue summary
+            init_msg = {"event": "queue_update", "data": queue_manager.get_summary()}
+            yield f"data: {json_dumps(init_msg)}\n\n"
+
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    msg = await asyncio.wait_for(sub_queue.get(), timeout=20.0)
+                    yield f"data: {msg}\n\n"
+                except asyncio.TimeoutError:
+                    # Heartbeat comment to keep connection alive
+                    yield ": heartbeat\n\n"
+        finally:
+            queue_manager.unsubscribe(sub_queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+import json
+def json_dumps(obj):
+    return json.dumps(obj)
+
+
+# ---------------- System & Settings Endpoints ---------------- #
+
+@app.get("/api/system/status")
+async def get_system_status():
+    total, used, free = 0, 0, 0
+    pct = 0.0
+    try:
+        usage = shutil.disk_usage(DOWNLOAD_DIR)
+        total = usage.total
+        used = usage.used
+        free = usage.free
+        if total > 0:
+            pct = round((used / total) * 100, 1)
+    except Exception:
+        pass
+
+    return {
+        "download_dir": str(DOWNLOAD_DIR),
+        "data_dir": str(DATA_DIR),
+        "steamcmd_bin": STEAMCMD_BIN,
+        "disk": {
+            "total_bytes": total,
+            "used_bytes": used,
+            "free_bytes": free,
+            "used_percent": pct,
+        },
+        "puid": os.getenv("PUID", "1000"),
+        "pgid": os.getenv("PGID", "1000"),
+    }
+
+
+@app.get("/api/settings")
+async def get_settings():
+    settings = load_settings()
+    # Mask password
+    masked = settings.copy()
+    if masked.get("steamcmd_password"):
+        masked["steamcmd_password"] = "******"
+    return masked
+
+
+@app.post("/api/settings")
+async def update_settings(req: SettingsUpdateRequest):
+    updates = {}
+    if req.steam_api_key is not None:
+        updates["steam_api_key"] = req.steam_api_key.strip()
+    if req.force_platform is not None:
+        updates["force_platform"] = req.force_platform
+    if req.validate_downloads is not None:
+        updates["validate_downloads"] = req.validate_downloads
+    if req.steamcmd_username is not None:
+        updates["steamcmd_username"] = req.steamcmd_username.strip()
+    if req.steamcmd_password is not None and req.steamcmd_password != "******":
+        updates["steamcmd_password"] = req.steamcmd_password
+    if req.custom_steamcmd_args is not None:
+        updates["custom_steamcmd_args"] = req.custom_steamcmd_args.strip()
+
+    updated = save_settings(updates)
+    masked = updated.copy()
+    if masked.get("steamcmd_password"):
+        masked["steamcmd_password"] = "******"
+    return masked
+

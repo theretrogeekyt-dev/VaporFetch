@@ -193,6 +193,7 @@ def is_tool_or_non_game(appid: int, name: str) -> bool:
         "modding tool",
         "modding tools",
         "creation kit",
+        "devkit",
         "redistributable",
         "redistributables",
         "soundtrack",
@@ -201,11 +202,18 @@ def is_tool_or_non_game(appid: int, name: str) -> bool:
         "bonus content",
         "artbook",
         "digital artbook",
+        "art book",
+        "digital art book",
+        "strategy guide",
+        "official guide",
+        "making of ",
         "playtest",
         "sdk",
         "benchmark",
         "translation server",
         "content system",
+        "trailer",
+        "teaser",
     ]
     for kw in tool_keywords:
         if kw in lower:
@@ -224,10 +232,15 @@ def is_tool_or_non_game(appid: int, name: str) -> bool:
         or " tool -" in lower
         or " tools (" in lower
         or " tool (" in lower
+        or " editor -" in lower
+        or " editor (" in lower
+        or " level editor" in lower
+        or " map editor" in lower
+        or " world editor" in lower
     ):
         return True
 
-    # 7. Betas, tests, prototypes, samples
+    # 7. Betas, tests, prototypes, samples, demos, soundtracks
     if (
         lower.endswith(" - beta")
         or lower.endswith(" beta")
@@ -235,11 +248,30 @@ def is_tool_or_non_game(appid: int, name: str) -> bool:
         or lower.endswith(" - test")
         or lower.endswith(" test")
         or lower.endswith(" (test)")
+        or lower.endswith(" - alpha")
+        or lower.endswith(" alpha")
+        or lower.endswith(" (alpha)")
+        or lower.endswith(" - demo")
+        or lower.endswith(" demo")
+        or lower.endswith(" (demo)")
+        or lower.endswith(" - teaser")
+        or lower.endswith(" (teaser)")
+        or lower.endswith(" teaser")
+        or lower.endswith(" - sample")
+        or lower.endswith(" (sample)")
+        or lower.endswith(" sample")
+        or lower.endswith(" - prototype")
+        or lower.endswith(" (prototype)")
+        or lower.endswith(" prototype")
         or " public test" in lower
         or " public beta" in lower
         or " closed beta" in lower
         or " open beta" in lower
         or " test server" in lower
+        or " ost" in lower
+        or lower.endswith(" ost")
+        or " (ost)" in lower
+        or " - ost" in lower
     ):
         return True
 
@@ -429,6 +461,7 @@ def populate_and_cache_games(app_ids: Set[int]) -> List[Dict[str, Any]]:
     """
     Resolve titles and build game library metadata for a set of AppIDs,
     persisting results to LIBRARY_CACHE_FILE.
+    Strictly filters out non-game packages (tools, servers, runtimes, betas, depots, etc.).
     """
     if not app_ids:
         return []
@@ -440,7 +473,8 @@ def populate_and_cache_games(app_ids: Set[int]) -> List[Dict[str, Any]]:
     games = []
     for aid in sorted(app_ids):
         name = resolver.resolve_name(aid)
-        is_tool = is_tool_or_non_game(aid, name)
+        if is_tool_or_non_game(aid, name):
+            continue
         status_info = check_backup_status(name, aid)
         games.append({
             "appid": aid,
@@ -449,7 +483,7 @@ def populate_and_cache_games(app_ids: Set[int]) -> List[Dict[str, Any]]:
             "backup_status": status_info["status"],
             "backup_size": status_info["size_formatted"],
             "backup_size_bytes": status_info["size_bytes"],
-            "is_tool": is_tool,
+            "is_tool": False,
         })
 
     # Save to cache
@@ -491,16 +525,20 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
     if not force_refresh and LIBRARY_CACHE_FILE.exists():
         try:
             with open(LIBRARY_CACHE_FILE, "r", encoding="utf-8") as f:
-                games = json.load(f)
-                # Update dynamic backup status and tool classification
-                for g in games:
+                cached_games = json.load(f)
+                clean_games = []
+                # Purge any non-game tools/depots/servers and update dynamic backup status
+                for g in cached_games:
+                    if is_tool_or_non_game(g.get("appid", 0), g.get("name", "")):
+                        continue
                     status_info = check_backup_status(g["name"], g["appid"])
                     g["backup_status"] = status_info["status"]
                     g["backup_size"] = status_info["size_formatted"]
                     g["backup_size_bytes"] = status_info["size_bytes"]
-                    g["is_tool"] = is_tool_or_non_game(g["appid"], g["name"])
-                safe_write_json(LIBRARY_CACHE_FILE, games)
-                return games, ""
+                    g["is_tool"] = False
+                    clean_games.append(g)
+                safe_write_json(LIBRARY_CACHE_FILE, clean_games)
+                return clean_games, ""
         except Exception:
             pass
 
@@ -675,13 +713,19 @@ def get_library_with_status(force_refresh: bool = False) -> Tuple[List[Dict[str,
                 with open(LIBRARY_CACHE_FILE, "r", encoding="utf-8") as f:
                     cached_games = json.load(f)
                     if cached_games:
-                        print(f"[VaporFetch] Refresh found 0 licenses; preserving {len(cached_games)} games from existing cache.")
+                        clean_cached = []
                         for g in cached_games:
+                            if is_tool_or_non_game(g.get("appid", 0), g.get("name", "")):
+                                continue
                             status_info = check_backup_status(g["name"], g["appid"])
                             g["backup_status"] = status_info["status"]
                             g["backup_size"] = status_info["size_formatted"]
                             g["backup_size_bytes"] = status_info["size_bytes"]
-                        return cached_games, error_msg
+                            g["is_tool"] = False
+                            clean_cached.append(g)
+                        safe_write_json(LIBRARY_CACHE_FILE, clean_cached)
+                        print(f"[VaporFetch] Refresh found 0 licenses; preserving {len(clean_cached)} games from existing cache.")
+                        return clean_cached, error_msg
             except Exception:
                 pass
         return [], error_msg

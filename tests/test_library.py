@@ -39,12 +39,13 @@ class TestLibrary(unittest.TestCase):
     def test_populate_and_cache_games(self):
         from vaporfetch.library import populate_and_cache_games, is_tool_or_non_game
         games = populate_and_cache_games({730, 400, 5, 90})
-        self.assertEqual(len(games), 4)
+        # 5 (Dedicated Server) and 90 (Half-Life Dedicated Server) must be excluded from the games list
+        self.assertEqual(len(games), 2)
         games_by_id = {g["appid"]: g for g in games}
-        self.assertFalse(games_by_id[730]["is_tool"])
-        self.assertFalse(games_by_id[400]["is_tool"])
-        self.assertTrue(games_by_id[5]["is_tool"])
-        self.assertTrue(games_by_id[90]["is_tool"])
+        self.assertIn(730, games_by_id)
+        self.assertIn(400, games_by_id)
+        self.assertNotIn(5, games_by_id)
+        self.assertNotIn(90, games_by_id)
 
         # Test tool / internal / runtime classifications
         self.assertTrue(is_tool_or_non_game(1493710, "Proton Experimental"))
@@ -52,6 +53,10 @@ class TestLibrary(unittest.TestCase):
         self.assertTrue(is_tool_or_non_game(480, "Spacewar"))
         self.assertTrue(is_tool_or_non_game(99999999, "Steam App 99999999"))
         self.assertTrue(is_tool_or_non_game(12345, "DOOM Eternal (Official Soundtrack)"))
+        self.assertTrue(is_tool_or_non_game(111, "Portal Demo"))
+        self.assertTrue(is_tool_or_non_game(112, "Cyberpunk 2077: Bonus Content"))
+        self.assertTrue(is_tool_or_non_game(113, "Elden Ring Digital Artbook"))
+        self.assertTrue(is_tool_or_non_game(114, "Half-Life 2 Teaser"))
         self.assertFalse(is_tool_or_non_game(1148590, "DOOM 64"))
         self.assertFalse(is_tool_or_non_game(2280, "DOOM + DOOM II"))
 
@@ -185,6 +190,39 @@ class TestLibrary(unittest.TestCase):
                 self.assertEqual(len(games), 1)
                 self.assertEqual(games[0]["appid"], 730)
                 self.assertEqual(games[0]["name"], "Counter-Strike 2")
+        finally:
+            if temp_cache.exists():
+                temp_cache.unlink()
+
+    def test_get_library_purges_non_games_from_existing_cache(self):
+        from unittest.mock import patch
+        import json
+        from vaporfetch.library import get_library_with_status
+
+        temp_cache = Path(tempfile.gettempdir()) / "test_vaporfetch_cache_purge.json"
+        try:
+            initial_games = [
+                {"appid": 730, "name": "Counter-Strike 2"},
+                {"appid": 513, "name": "Left 4 Dead Authoring Tools"},
+                {"appid": 575, "name": "Dota 2 - English Depot"},
+            ]
+            with open(temp_cache, "w", encoding="utf-8") as f:
+                json.dump(initial_games, f)
+
+            mock_session = {"username": "testuser"}
+            with patch("vaporfetch.library.get_current_session", return_value=mock_session), \
+                 patch("vaporfetch.library.LIBRARY_CACHE_FILE", temp_cache):
+                games, err = get_library_with_status(force_refresh=False)
+                # Only Counter-Strike 2 should remain
+                self.assertEqual(len(games), 1)
+                self.assertEqual(games[0]["appid"], 730)
+                self.assertEqual(games[0]["name"], "Counter-Strike 2")
+
+                # Verify file on disk was also updated to purge non-games
+                with open(temp_cache, "r", encoding="utf-8") as f:
+                    disk_games = json.load(f)
+                self.assertEqual(len(disk_games), 1)
+                self.assertEqual(disk_games[0]["appid"], 730)
         finally:
             if temp_cache.exists():
                 temp_cache.unlink()

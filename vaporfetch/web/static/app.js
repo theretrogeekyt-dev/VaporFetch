@@ -706,9 +706,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const data = await res.json();
       state.games = data.games || [];
-      const playableGames = state.games.filter((g) => !g.is_tool);
-      elements.libraryCountBadge.textContent =
-        playableGames.length > 0 ? playableGames.length : state.games.length;
+      elements.libraryCountBadge.textContent = state.games.length;
 
       lastSyncError = data.error || "";
       if (data.error && state.games.length === 0) {
@@ -784,10 +782,6 @@ document.addEventListener("DOMContentLoaded", () => {
         game.name.toLowerCase().includes(query) || String(game.appid).includes(query);
       if (!matchesSearch) return false;
 
-      if (statusFilter === "tools") return !!game.is_tool;
-      if (statusFilter === "all_incl_tools") return true;
-
-      // In game-focused views ("all", "downloaded", "not_downloaded"), exclude tools/internal items
       if (game.is_tool) return false;
 
       if (statusFilter === "downloaded") return game.backup_status === "downloaded";
@@ -813,11 +807,8 @@ document.addEventListener("DOMContentLoaded", () => {
       card.className = `game-card ${isSelected ? "selected" : ""}`;
       card.setAttribute("data-appid", game.appid);
 
-      const isTool = !!game.is_tool;
       let statusBadge = "";
-      if (isTool) {
-        statusBadge = `<span class="game-card-status-pill" style="background: rgba(100, 116, 139, 0.2); color: #94a3b8; border: 1px solid rgba(100, 116, 139, 0.3);">Tool / Server</span>`;
-      } else if (game.backup_status === "downloaded") {
+      if (game.backup_status === "downloaded") {
         statusBadge = `<span class="game-card-status-pill status-downloaded">Backed Up (${game.backup_size})</span>`;
       } else if (game.backup_status === "incomplete") {
         statusBadge = `<span class="game-card-status-pill status-queued">Incomplete</span>`;
@@ -844,7 +835,7 @@ document.addEventListener("DOMContentLoaded", () => {
           </div>
           <div class="game-card-actions">
             <button class="btn btn-sm btn-outline quick-backup-btn" style="width: 100%;">
-              💾 ${isTool ? "Backup Tool" : "Backup Game"}
+              💾 Backup Game
             </button>
           </div>
         </div>
@@ -916,8 +907,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function queueAllGames() {
     if (!checkSteamCmdAuthBeforeDownload()) return;
-    const playableGames = state.games.filter((g) => !g.is_tool);
-    const count = playableGames.length || state.games.length;
+    const count = state.games.length;
     if (!confirm(`Are you sure you want to backup all ${count} games in your library?`)) {
       return;
     }

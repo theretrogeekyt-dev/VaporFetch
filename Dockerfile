@@ -5,6 +5,7 @@ LABEL maintainer="VaporFetch Contributors" \
 
 ENV DEBIAN_FRONTEND=noninteractive \
     STEAMCMD_DIR=/usr/local/steamcmd \
+    STEAMCMD_PATH=/usr/local/steamcmd/steamcmd.sh \
     PATH="/usr/local/steamcmd:${PATH}" \
     PUID=1000 \
     PGID=1000 \
@@ -20,6 +21,8 @@ RUN dpkg --add-architecture i386 && \
         ca-certificates \
         curl \
         gosu \
+        libc6:i386 \
+        libstdc++6:i386 \
         lib32gcc-s1 \
         lib32stdc++6 \
         libsdl2-2.0-0:i386 \
@@ -29,13 +32,17 @@ RUN dpkg --add-architecture i386 && \
     rm -rf /var/lib/apt/lists/*
 
 # 2. Download and set up SteamCMD
+# Use a wrapper script instead of a symlink so dirname $0 evaluates to /usr/local/steamcmd
 RUN mkdir -p ${STEAMCMD_DIR} && \
     curl -fsSL 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz' | tar -xz -C ${STEAMCMD_DIR} && \
     chmod +x ${STEAMCMD_DIR}/steamcmd.sh && \
-    ln -s ${STEAMCMD_DIR}/steamcmd.sh /usr/local/bin/steamcmd
+    printf '#!/bin/sh\nexec /usr/local/steamcmd/steamcmd.sh "$@"\n' > /usr/local/bin/steamcmd && \
+    chmod +x /usr/local/bin/steamcmd && \
+    chmod -R 777 ${STEAMCMD_DIR}
 
 # 3. Bootstrap SteamCMD during build so container startup doesn't stall on downloading core engine
-RUN steamcmd +quit || true
+RUN /usr/local/steamcmd/steamcmd.sh +quit || true && \
+    chmod -R 777 ${STEAMCMD_DIR}
 
 # 4. Prepare Application Directory
 WORKDIR /app

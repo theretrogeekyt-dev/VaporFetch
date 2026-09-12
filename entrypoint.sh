@@ -48,8 +48,8 @@ mkdir -p /config /downloads /config/Steam /config/.steam /config/.local
 ln -sf /config/.steam /root/.steam 2>/dev/null || true
 ln -sf /config/Steam /root/Steam 2>/dev/null || true
 
-# 4. Permissions on /config
-chown -R "${PUID}:${PGID}" /config /app 2>/dev/null || true
+# 4. Permissions on /config and /usr/local/steamcmd
+chown -R "${PUID}:${PGID}" /config /app /usr/local/steamcmd 2>/dev/null || chmod -R 777 /usr/local/steamcmd 2>/dev/null || true
 
 # 5. Check /downloads permissions
 if [ -d "/downloads" ]; then

@@ -6,6 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PUID=1000 \
     PGID=1000 \
     UMASK=002 \
+    HOME=/home/steam \
     DOWNLOAD_DIR=/downloads \
     DATA_DIR=/app/data \
     STEAMCMD_PATH=/steamcmd/steamcmd.sh \
@@ -26,15 +27,25 @@ RUN dpkg --add-architecture i386 \
        lib32stdc++6 \
        libc6:i386 \
        libstdc++6:i386 \
+       libcurl4:i386 \
+       libbz2-1.0:i386 \
        locales \
     && rm -rf /var/lib/apt/lists/*
 
-# Install SteamCMD directly from Valve
+# Install SteamCMD directly from Valve and configure permissions
 RUN mkdir -p /steamcmd \
     && curl -fsSL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar -zxvf - -C /steamcmd \
-    && chmod +x /steamcmd/steamcmd.sh \
+    && chmod -R 777 /steamcmd \
+    && chmod -R +x /steamcmd \
     && mkdir -p /usr/games \
-    && ln -sf /steamcmd/steamcmd.sh /usr/games/steamcmd
+    && ln -sf /steamcmd/steamcmd.sh /usr/games/steamcmd \
+    && mkdir -p /home/steam \
+    && chmod -R 777 /home/steam
+
+# Pre-populate and initialize SteamCMD during build so all runtime binaries exist
+RUN /steamcmd/steamcmd.sh +quit || true \
+    && chmod -R 777 /steamcmd \
+    && chmod -R +x /steamcmd
 
 # Set up Python virtual environment
 RUN python3 -m venv /opt/venv
@@ -56,4 +67,3 @@ EXPOSE 8080
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
-

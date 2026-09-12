@@ -204,7 +204,7 @@ class DownloadQueueManager:
         validate = settings.get("validate_downloads", True)
         custom_args = settings.get("custom_steamcmd_args", "").strip()
 
-        cmd = [STEAMCMD_BIN]
+        cmd = ["/bin/bash", STEAMCMD_BIN]
         cmd.extend(["+force_install_dir", str(install_path)])
 
         if platform_type in ("windows", "linux", "macos"):
@@ -235,12 +235,17 @@ class DownloadQueueManager:
         last_bytes = 0
         last_time = time.time()
 
+        proc_env = os.environ.copy()
+        proc_env["HOME"] = "/home/steam"
+
         try:
-            # Execute SteamCMD subprocess
+            # Execute SteamCMD subprocess with explicit HOME and working dir
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT
+                stderr=asyncio.subprocess.STDOUT,
+                env=proc_env,
+                cwd="/home/steam" if Path("/home/steam").exists() else None
             )
             self.active_process = process
 
@@ -286,6 +291,10 @@ class DownloadQueueManager:
                     item.progress = 100.0
                 elif "ERROR!" in line or "Failed to install" in line:
                     item.error = line
+                elif "No subscription" in line:
+                    item.error = "Steam account does not own this game (No subscription)."
+                elif "Enter password for user" in line or "password:" in line:
+                    item.error = "Steam password required for commercial games. Please enter your password in Settings."
 
                 await self.broadcast("item_log", {
                     "id": item.id,
@@ -310,7 +319,15 @@ class DownloadQueueManager:
                 item.log_tail.append("Process cancelled.")
             else:
                 item.status = "failed"
-                item.error = item.error or f"SteamCMD exited with error code {returncode}."
+                # If error wasn't caught by specific pattern, find the last meaningful log message
+                if not item.error:
+                    candidate_lines = [
+                        l for l in item.log_tail 
+                        if not l.startswith("Executing:") and not l.startswith("Starting download") and not l.startswith("Destination:")
+                    ]
+                    last_msg = candidate_lines[-1] if candidate_lines else f"exit code {returncode}"
+                    item.error = f"SteamCMD failed ({last_msg})"
+
                 item.step = "Failed"
                 item.log_tail.append(f"Download failed: {item.error}")
 

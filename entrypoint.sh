@@ -28,22 +28,28 @@ else
     useradd -u "$PUID" -g "$PGID" -m -d /home/steam -s /bin/bash "$USER_NAME"
 fi
 
-# Prepare persistent Steam cache directories inside /app/data
+# Set HOME environment variable explicitly to /home/steam
+export HOME="/home/steam"
+
+# Prepare persistent Steam cache directories inside /app/data and /home/steam
 mkdir -p /app/data/steam_home
 mkdir -p /home/steam/.steam
 mkdir -p /home/steam/.local/share/Steam
 mkdir -p /downloads
 
-# Symlink persistent Steam cache if needed
-chown -R "$PUID:$PGID" /app/data /home/steam /app
+# Ensure /steamcmd is fully writable and executable by non-root users
+chmod -R 777 /steamcmd 2>/dev/null || true
+chmod -R +x /steamcmd 2>/dev/null || true
+
+# Set ownership
+chown -R "$PUID:$PGID" /app/data /home/steam /app /steamcmd 2>/dev/null || true
 
 # Ensure /downloads is writable by the user
 if [ -d "/downloads" ]; then
     chown "$PUID:$PGID" /downloads 2>/dev/null || true
 fi
 
-echo "[VaporFetch] Running as ${USER_NAME} (${PUID}:${PGID})"
+echo "[VaporFetch] Running as ${USER_NAME} (${PUID}:${PGID}) with HOME=${HOME}"
 
 # Drop privileges to PUID:PGID and run the application
-exec gosu "$PUID:$PGID" "$@"
-
+exec gosu "$PUID:$PGID" env HOME=/home/steam "$@"

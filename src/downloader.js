@@ -52,10 +52,17 @@ class Downloader extends EventEmitter {
 
   appendLog(text, type = 'stdout') {
     const timestamp = new Date().toISOString().substring(11, 19);
-    const entry = { timestamp, text: text.replace(/\r/g, ''), type };
-    this.logHistory.push(entry);
-    if (this.logHistory.length > this.maxLogs) {
-      this.logHistory.shift();
+    const isProgress = /Update state \(/i.test(text);
+    const entry = { timestamp, text: text.replace(/\r/g, ''), type, isProgress };
+
+    if (isProgress && this.logHistory.length > 0 && this.logHistory[this.logHistory.length - 1].isProgress) {
+      // Replace previous progress log line in place to avoid terminal flood
+      this.logHistory[this.logHistory.length - 1] = entry;
+    } else {
+      this.logHistory.push(entry);
+      if (this.logHistory.length > this.maxLogs) {
+        this.logHistory.shift();
+      }
     }
     this.emit('log', entry);
   }
@@ -222,8 +229,10 @@ class Downloader extends EventEmitter {
     const handleData = (chunk, isStderr = false) => {
       const text = chunk.toString();
       lineBuffer += text;
-      const lines = lineBuffer.split('\n');
-      lineBuffer = lines.pop(); // keep remainder
+
+      // Split on either \r\n, \n, or standalone \r (SteamCMD emits \r for live progress)
+      const lines = lineBuffer.split(/\r?\n|\r/);
+      lineBuffer = lines.pop() || ''; // keep remainder
 
       for (const rawLine of lines) {
         const line = rawLine.trim();
@@ -322,7 +331,7 @@ class Downloader extends EventEmitter {
 
       const now = Date.now();
       const deltaSec = (now - this.lastProgressCheck) / 1000;
-      if (deltaSec >= 1 && currentBytes >= this.lastBytesCurrent) {
+      if (deltaSec >= 0.3 && currentBytes >= this.lastBytesCurrent) {
         this.currentSpeed = (currentBytes - this.lastBytesCurrent) / deltaSec;
         this.lastProgressCheck = now;
         this.lastBytesCurrent = currentBytes;

@@ -40,194 +40,79 @@
       </div>
     </header>
 
-    <!-- Main Content Grid -->
-    <main class="main-grid">
-      <!-- Left Column: Form Controls -->
-      <section class="panel form-panel">
-        <div class="panel-header">
-          <h2>New Download Task</h2>
-          <span class="badge-hint">SteamCMD Engine</span>
+    <!-- Top Active Task Mini-Banner (Always Visible When Downloading) -->
+    <div id="active-task-banner" class="active-banner hidden">
+      <div class="active-banner-info">
+        <span class="pulse-dot"></span>
+        <strong id="banner-game-name">Downloading...</strong>
+        <span class="banner-speed" id="banner-speed">0 B/s</span>
+      </div>
+      <div class="active-banner-progress">
+        <div class="active-banner-bar">
+          <div class="active-banner-bar-fill" id="banner-progress-fill" style="width: 0%;"></div>
+        </div>
+        <span id="banner-percent">0%</span>
+      </div>
+      <button type="button" class="btn-sm btn-secondary" id="btn-banner-view">View Task</button>
+    </div>
+
+    <!-- Main Navigation Tabs -->
+    <nav class="tabs-nav">
+      <button type="button" class="tab-btn active" data-tab="tab-library">
+        <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+        <span>Game Library</span>
+        <span class="tab-count-badge" id="library-count-badge">0</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="tab-monitor">
+        <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+        <span>Active Task & Console</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="tab-direct">
+        <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+        <span>Direct AppID Download</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="tab-history">
+        <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+        <span>History</span>
+      </button>
+    </nav>
+
+    <!-- TAB 1: GAME LIBRARY -->
+    <section id="tab-library" class="tab-content active">
+      <div class="library-header-panel">
+        <div class="library-search-box">
+          <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input type="text" id="library-search" placeholder="Search games by name or AppID..." class="form-input">
         </div>
 
-        <!-- Preset Quick Select -->
-        <div class="form-group">
-          <label class="section-label">Popular Dedicated Server Presets</label>
-          <div class="preset-chips-wrapper" id="preset-chips">
-            <!-- Dynamically populated presets -->
-            <span class="preset-loading">Loading presets...</span>
-          </div>
+        <div class="library-filters">
+          <button type="button" class="filter-chip active" data-filter="all">All Games</button>
+          <button type="button" class="filter-chip" data-filter="owned">My Steam Games</button>
+          <button type="button" class="filter-chip" data-filter="servers">Dedicated Servers</button>
+          <button type="button" class="filter-chip" data-filter="installed">Installed on NAS</button>
         </div>
 
-        <form id="download-form" autocomplete="off">
-          <!-- App ID Input with Live Lookup -->
-          <div class="form-group">
-            <label for="appId" class="input-label">Steam AppID <span class="required">*</span></label>
-            <div class="input-action-row">
-              <input type="text" id="appId" name="appId" placeholder="e.g., 2394010 or 730" required pattern="[0-9]+" class="form-input">
-              <button type="button" id="btn-lookup" class="btn-secondary" title="Query Steam Store API">Inspect</button>
-            </div>
-            <small class="field-hint">Find AppIDs easily on <a href="https://steamdb.info/apps/" target="_blank" rel="noopener">SteamDB</a>.</small>
-          </div>
-
-          <!-- Live Game Preview Card -->
-          <div id="game-preview" class="game-preview-card hidden">
-            <img id="preview-image" src="" alt="Game Art" class="preview-thumb">
-            <div class="preview-info">
-              <h4 id="preview-name">Loading...</h4>
-              <p id="preview-meta">AppID: <span id="preview-appid">-</span></p>
-            </div>
-          </div>
-
-          <!-- Target Subfolder on NAS -->
-          <div class="form-group">
-            <label for="installDir" class="input-label">Target Subfolder on NAS <span class="required">*</span></label>
-            <div class="input-prefix-row">
-              <span class="input-prefix">/downloads/</span>
-              <input type="text" id="installDir" name="installDir" placeholder="e.g. palworld" required class="form-input">
-            </div>
-            <small class="field-hint">Files are saved directly to your NAS share with configured PUID/PGID permissions.</small>
-          </div>
-
-          <!-- Authentication Switcher -->
-          <div class="form-group auth-section">
-            <label class="input-label">Authentication</label>
-            <div class="radio-toggle-group">
-              <label class="radio-card">
-                <input type="radio" name="authMode" value="anonymous" checked>
-                <div class="radio-card-content">
-                  <span class="radio-title">Anonymous</span>
-                  <span class="radio-desc">Free games & most dedicated servers</span>
-                </div>
-              </label>
-
-              <label class="radio-card">
-                <input type="radio" name="authMode" value="account">
-                <div class="radio-card-content">
-                  <span class="radio-title">Steam Account</span>
-                  <span class="radio-desc">Games requiring account ownership</span>
-                </div>
-              </label>
-            </div>
-
-            <!-- Steam Credentials Container -->
-            <div id="account-credentials" class="credentials-box hidden">
-              <div class="grid-2">
-                <div class="form-group">
-                  <label for="username" class="input-label">Steam Username</label>
-                  <input type="text" id="username" name="username" placeholder="Username" class="form-input" autocomplete="username">
-                </div>
-                <div class="form-group">
-                  <label for="password" class="input-label">Steam Password</label>
-                  <input type="password" id="password" name="password" placeholder="Password" class="form-input" autocomplete="current-password">
-                </div>
-              </div>
-              <div class="form-group">
-                <label for="steamGuardCode" class="input-label">Steam Guard Code <span class="badge-hint">Optional</span></label>
-                <input type="text" id="steamGuardCode" name="steamGuardCode" placeholder="Enter if already known (or wait for prompt)" class="form-input">
-              </div>
-              <small class="field-hint secure-notice">Credentials are passed directly to local SteamCMD in memory and never stored in plaintext.</small>
-            </div>
-          </div>
-
-          <!-- Advanced Accordion -->
-          <details class="advanced-details">
-            <summary class="advanced-summary">Advanced Settings (Platform, Validate, Beta)</summary>
-            <div class="advanced-content">
-              <div class="grid-2">
-                <div class="form-group">
-                  <label for="platform" class="input-label">Force Platform</label>
-                  <select id="platform" name="platform" class="form-select">
-                    <option value="auto">Auto (Native Host)</option>
-                    <option value="windows">Force Windows (Recommended for Windows-only servers)</option>
-                    <option value="linux">Force Linux</option>
-                    <option value="macos">Force macOS</option>
-                  </select>
-                </div>
-
-                <div class="form-group checkbox-group">
-                  <label class="checkbox-label" for="validate">
-                    <input type="checkbox" id="validate" name="validate" checked>
-                    <span>Validate game files after download</span>
-                  </label>
-                </div>
-              </div>
-
-              <div class="grid-2">
-                <div class="form-group">
-                  <label for="beta" class="input-label">Beta Branch <span class="badge-hint">Optional</span></label>
-                  <input type="text" id="beta" name="beta" placeholder="e.g. public-test" class="form-input">
-                </div>
-                <div class="form-group">
-                  <label for="betaPassword" class="input-label">Beta Password <span class="badge-hint">Optional</span></label>
-                  <input type="password" id="betaPassword" name="betaPassword" placeholder="Branch password if private" class="form-input">
-                </div>
-              </div>
-
-              <div class="grid-2">
-                <div class="form-group checkbox-group">
-                  <label class="checkbox-label" for="removeSteamApps">
-                    <input type="checkbox" id="removeSteamApps" name="removeSteamApps" checked>
-                    <span>Remove steamapps folder from destination</span>
-                  </label>
-                </div>
-                <div class="form-group checkbox-group">
-                  <label class="checkbox-label" for="renameRedist">
-                    <input type="checkbox" id="renameRedist" name="renameRedist" checked>
-                    <span>Rename redist folder to 'dependencies'</span>
-                  </label>
-                </div>
-              </div>
-            </div>
-          </details>
-
-          <!-- Form Action Buttons -->
-          <div class="form-actions">
-            <button type="submit" id="btn-submit" class="btn-primary">
-              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-              <span>Download to NAS</span>
-            </button>
-            <button type="button" id="btn-cancel" class="btn-danger hidden">
-              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none">
-                <circle cx="12" cy="12" r="10"></circle>
-                <line x1="15" y1="9" x2="9" y2="15"></line>
-                <line x1="9" y1="9" x2="15" y2="15"></line>
-              </svg>
-              <span>Cancel Download</span>
-            </button>
-          </div>
-        </form>
-      </section>
-
-      <!-- Right Column: Live Monitor & Console -->
-      <section class="panel monitor-panel">
-        <div class="panel-header">
-          <h2>Download Status & Console</h2>
-          <div class="console-actions">
-            <button id="btn-autoscroll" class="btn-icon active" title="Toggle Auto-scroll">
-              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
-                <polyline points="7 13 12 18 17 13"></polyline>
-                <polyline points="7 6 12 11 17 6"></polyline>
-              </svg>
-            </button>
-            <button id="btn-copy-logs" class="btn-icon" title="Copy Logs">
-              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-              </svg>
-            </button>
-            <button id="btn-clear-logs" class="btn-icon" title="Clear Console View">
-              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
-                <polyline points="3 6 5 6 21 6"></polyline>
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-              </svg>
-            </button>
-          </div>
+        <div class="library-actions">
+          <button type="button" class="btn-primary btn-sm" id="btn-open-sync-modal">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+            <span>Sync Steam Account</span>
+          </button>
+          <button type="button" class="btn-secondary btn-sm" id="btn-open-add-game">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            <span>Add Game</span>
+          </button>
         </div>
+      </div>
 
+      <!-- Library Games Grid -->
+      <div class="library-grid" id="library-grid">
+        <div class="library-empty text-muted">Loading games...</div>
+      </div>
+    </section>
+
+    <!-- TAB 2: ACTIVE TASK & STREAMING CONSOLE -->
+    <section id="tab-monitor" class="tab-content">
+      <div class="monitor-layout">
         <!-- Active Task Dashboard -->
         <div class="monitor-dashboard" id="monitor-dashboard">
           <div class="dashboard-details">
@@ -259,6 +144,10 @@
               <span id="progress-status-desc">Ready for task</span>
             </div>
           </div>
+
+          <div class="monitor-actions">
+            <button type="button" id="btn-cancel-active" class="btn-danger hidden">Cancel Download</button>
+          </div>
         </div>
 
         <!-- Terminal Output Window -->
@@ -270,40 +159,339 @@
               <span class="dot dot-green"></span>
             </div>
             <span class="terminal-title">steamcmd.log</span>
+            <div class="console-actions">
+              <button id="btn-autoscroll" class="btn-icon active" title="Toggle Auto-scroll">
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polyline points="7 13 12 18 17 13"></polyline><polyline points="7 6 12 11 17 6"></polyline></svg>
+              </button>
+              <button id="btn-copy-logs" class="btn-icon" title="Copy Logs">
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              </button>
+              <button id="btn-clear-logs" class="btn-icon" title="Clear Console View">
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              </button>
+            </div>
           </div>
           <pre id="terminal" class="terminal-output"><span class="log-system">[VaporFetch] System initialized. Ready to download.</span></pre>
         </div>
-      </section>
-    </main>
-
-    <!-- History & Storage Section -->
-    <section class="panel history-panel">
-      <div class="panel-header">
-        <h2>Download History</h2>
-        <button id="btn-clear-history" class="btn-text">Clear History</button>
-      </div>
-      <div class="table-responsive">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>AppID</th>
-              <th>Name</th>
-              <th>Target Path</th>
-              <th>Mode</th>
-              <th>Status</th>
-              <th>Date</th>
-            </tr>
-          </thead>
-          <tbody id="history-table-body">
-            <tr>
-              <td colspan="6" class="text-center text-muted">No download history recorded yet.</td>
-            </tr>
-          </tbody>
-        </table>
       </div>
     </section>
 
-    <!-- Steam Guard 2FA Modal -->
+    <!-- TAB 3: DIRECT DOWNLOAD / CUSTOM APPID -->
+    <section id="tab-direct" class="tab-content">
+      <div class="panel form-panel">
+        <div class="panel-header">
+          <h2>Direct AppID Download</h2>
+          <span class="badge-hint">SteamCMD Engine</span>
+        </div>
+
+        <!-- Preset Quick Select -->
+        <div class="form-group">
+          <label class="section-label">Dedicated Server Presets</label>
+          <div class="preset-chips-wrapper" id="preset-chips">
+            <span class="preset-loading">Loading presets...</span>
+          </div>
+        </div>
+
+        <form id="download-form" autocomplete="off">
+          <div class="form-group">
+            <label for="appId" class="input-label">Steam AppID <span class="required">*</span></label>
+            <div class="input-action-row">
+              <input type="text" id="appId" name="appId" placeholder="e.g., 2280, 2394010, or 730" required pattern="[0-9]+" class="form-input">
+              <button type="button" id="btn-lookup" class="btn-secondary" title="Query Steam Store API">Inspect</button>
+            </div>
+          </div>
+
+          <div id="game-preview" class="game-preview-card hidden">
+            <img id="preview-image" src="" alt="Game Art" class="preview-thumb">
+            <div class="preview-info">
+              <h4 id="preview-name">Loading...</h4>
+              <p id="preview-meta">AppID: <span id="preview-appid">-</span></p>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="installDir" class="input-label">Target Subfolder on NAS <span class="required">*</span></label>
+            <div class="input-prefix-row">
+              <span class="input-prefix">/downloads/</span>
+              <input type="text" id="installDir" name="installDir" placeholder="e.g. doomplusdoom2" required class="form-input">
+            </div>
+          </div>
+
+          <div class="form-group auth-section">
+            <label class="input-label">Authentication</label>
+            <div class="radio-toggle-group">
+              <label class="radio-card">
+                <input type="radio" name="authMode" value="anonymous" checked>
+                <div class="radio-card-content">
+                  <span class="radio-title">Anonymous</span>
+                  <span class="radio-desc">Free games & dedicated servers</span>
+                </div>
+              </label>
+
+              <label class="radio-card">
+                <input type="radio" name="authMode" value="account">
+                <div class="radio-card-content">
+                  <span class="radio-title">Steam Account</span>
+                  <span class="radio-desc">Games requiring account ownership</span>
+                </div>
+              </label>
+            </div>
+
+            <div id="account-credentials" class="credentials-box hidden">
+              <div class="grid-2">
+                <div class="form-group">
+                  <label for="username" class="input-label">Steam Username</label>
+                  <input type="text" id="username" name="username" placeholder="Username" class="form-input" autocomplete="username">
+                </div>
+                <div class="form-group">
+                  <label for="password" class="input-label">Steam Password</label>
+                  <input type="password" id="password" name="password" placeholder="Password" class="form-input" autocomplete="current-password">
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="steamGuardCode" class="input-label">Steam Guard Code <span class="badge-hint">Optional</span></label>
+                <input type="text" id="steamGuardCode" name="steamGuardCode" placeholder="Enter if already known (or wait for 2FA prompt)" class="form-input">
+              </div>
+            </div>
+          </div>
+
+          <details class="advanced-details">
+            <summary class="advanced-summary">Advanced Settings (Platform, Cleanups, Beta)</summary>
+            <div class="advanced-content">
+              <div class="grid-2">
+                <div class="form-group">
+                  <label for="platform" class="input-label">Force Platform</label>
+                  <select id="platform" name="platform" class="form-select">
+                    <option value="auto">Auto (Native Host)</option>
+                    <option value="windows">Force Windows (Recommended for Windows-only games/servers)</option>
+                    <option value="linux">Force Linux</option>
+                    <option value="macos">Force macOS</option>
+                  </select>
+                </div>
+
+                <div class="form-group checkbox-group">
+                  <label class="checkbox-label" for="validate">
+                    <input type="checkbox" id="validate" name="validate" checked>
+                    <span>Validate game files</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="grid-2">
+                <div class="form-group checkbox-group">
+                  <label class="checkbox-label" for="removeSteamApps">
+                    <input type="checkbox" id="removeSteamApps" name="removeSteamApps" checked>
+                    <span>Remove steamapps folder from destination</span>
+                  </label>
+                </div>
+                <div class="form-group checkbox-group">
+                  <label class="checkbox-label" for="renameRedist">
+                    <input type="checkbox" id="renameRedist" name="renameRedist" checked>
+                    <span>Rename redist folder to 'dependencies'</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="grid-2">
+                <div class="form-group">
+                  <label for="beta" class="input-label">Beta Branch <span class="badge-hint">Optional</span></label>
+                  <input type="text" id="beta" name="beta" placeholder="e.g. public-test" class="form-input">
+                </div>
+                <div class="form-group">
+                  <label for="betaPassword" class="input-label">Beta Password <span class="badge-hint">Optional</span></label>
+                  <input type="password" id="betaPassword" name="betaPassword" placeholder="Branch password" class="form-input">
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <div class="form-actions">
+            <button type="submit" id="btn-submit" class="btn-primary">
+              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              <span>Download to NAS</span>
+            </button>
+            <button type="button" id="btn-cancel" class="btn-danger hidden">Cancel Download</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- TAB 4: HISTORY -->
+    <section id="tab-history" class="tab-content">
+      <div class="panel history-panel">
+        <div class="panel-header">
+          <h2>Download History</h2>
+          <button id="btn-clear-history" class="btn-text">Clear History</button>
+        </div>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>AppID</th>
+                <th>Name</th>
+                <th>Target Path</th>
+                <th>Mode</th>
+                <th>Status</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody id="history-table-body">
+              <tr>
+                <td colspan="6" class="text-center text-muted">No download history recorded yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- MODAL 1: Steam Account Sync Modal -->
+    <div id="sync-modal" class="modal-backdrop hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>Sync Steam Account Library</h3>
+          <button type="button" class="btn-icon" id="btn-close-sync-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p>Enter your Steam Username, Custom Vanity URL, or 64-bit Steam ID to load your owned games directly into VaporFetch.</p>
+          <div class="form-group">
+            <label for="sync-identifier" class="input-label">Steam Username / Vanity URL / SteamID64 <span class="required">*</span></label>
+            <input type="text" id="sync-identifier" placeholder="e.g. reaper360vr or 76561198..." class="form-input">
+            <small class="field-hint">Works automatically if your Steam profile game details are set to Public.</small>
+          </div>
+          <div class="form-group">
+            <label for="sync-apikey" class="input-label">Steam Web API Key <span class="badge-hint">Optional</span></label>
+            <input type="password" id="sync-apikey" placeholder="Optional (only needed if profile is private)" class="form-input">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="btn-submit-sync" class="btn-primary">Sync Games</button>
+          <button type="button" class="btn-secondary modal-close-btn">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 2: Add Custom Game Modal -->
+    <div id="add-game-modal" class="modal-backdrop hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>Add Game to Library</h3>
+          <button type="button" class="btn-icon modal-close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="add-appid" class="input-label">Steam AppID <span class="required">*</span></label>
+            <input type="text" id="add-appid" placeholder="e.g. 2280" class="form-input" required pattern="[0-9]+">
+          </div>
+          <div class="form-group">
+            <label for="add-name" class="input-label">Game Name</label>
+            <input type="text" id="add-name" placeholder="e.g. DOOM + DOOM II" class="form-input">
+          </div>
+          <div class="form-group">
+            <label for="add-type" class="input-label">Category</label>
+            <select id="add-type" class="form-select">
+              <option value="game">Steam Game (Account Owned)</option>
+              <option value="server">Dedicated Server (Anonymous)</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="btn-submit-add-game" class="btn-primary">Add to Library</button>
+          <button type="button" class="btn-secondary modal-close-btn">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 3: One-Click Game Download Modal -->
+    <div id="quick-download-modal" class="modal-backdrop hidden">
+      <div class="modal-card modal-lg">
+        <div class="modal-header">
+          <h3 id="quick-modal-title">Download Game to NAS</h3>
+          <button type="button" class="btn-icon modal-close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="game-preview-card" style="margin-bottom: 1rem;">
+            <img id="quick-modal-img" src="" alt="Game Header" class="preview-thumb">
+            <div class="preview-info">
+              <h4 id="quick-modal-name">-</h4>
+              <p id="quick-modal-appid">AppID: -</p>
+            </div>
+          </div>
+
+          <form id="quick-download-form">
+            <input type="hidden" id="quick-appid" name="appId">
+
+            <div class="form-group">
+              <label for="quick-dir" class="input-label">Target Subfolder on NAS</label>
+              <div class="input-prefix-row">
+                <span class="input-prefix">/downloads/</span>
+                <input type="text" id="quick-dir" name="installDir" required class="form-input">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="input-label">Authentication</label>
+              <div class="radio-toggle-group">
+                <label class="radio-card">
+                  <input type="radio" name="quickAuthMode" value="account" checked>
+                  <div class="radio-card-content">
+                    <span class="radio-title">Steam Account</span>
+                    <span class="radio-desc">For owned games</span>
+                  </div>
+                </label>
+                <label class="radio-card">
+                  <input type="radio" name="quickAuthMode" value="anonymous">
+                  <div class="radio-card-content">
+                    <span class="radio-title">Anonymous</span>
+                    <span class="radio-desc">For dedicated servers</span>
+                  </div>
+                </label>
+              </div>
+
+              <div id="quick-creds-box" class="credentials-box">
+                <div class="grid-2">
+                  <div class="form-group">
+                    <label for="quick-username" class="input-label">Username</label>
+                    <input type="text" id="quick-username" name="username" placeholder="Steam Username" class="form-input">
+                  </div>
+                  <div class="form-group">
+                    <label for="quick-password" class="input-label">Password</label>
+                    <input type="password" id="quick-password" name="password" placeholder="Password" class="form-input">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid-2">
+              <div class="form-group">
+                <label for="quick-platform" class="input-label">Platform</label>
+                <select id="quick-platform" name="platform" class="form-select">
+                  <option value="windows">Force Windows</option>
+                  <option value="linux">Force Linux</option>
+                  <option value="auto">Auto</option>
+                </select>
+              </div>
+              <div class="form-group checkbox-group" style="padding-top: 1.5rem;">
+                <label class="checkbox-label" for="quick-validate">
+                  <input type="checkbox" id="quick-validate" name="validate" checked>
+                  <span>Validate files</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="modal-footer" style="padding-top: 1rem; border-top: 1px solid var(--border-color);">
+              <button type="submit" id="btn-quick-start" class="btn-primary">
+                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                <span>Start Download</span>
+              </button>
+              <button type="button" class="btn-secondary modal-close-btn">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 4: Steam Guard 2FA Modal -->
     <div id="steamguard-modal" class="modal-backdrop hidden">
       <div class="modal-card">
         <div class="modal-header">
@@ -328,4 +516,3 @@
   <script src="app.js"></script>
 </body>
 </html>
-

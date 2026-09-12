@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const Downloader = require('./src/downloader');
+const LibraryManager = require('./src/library');
 const { getStorageInfo, listSubdirectories } = require('./src/disk');
 const { getAppInfo, getPresets } = require('./src/steamApi');
 
@@ -22,6 +23,11 @@ const downloader = new Downloader({
   downloadsDir: DOWNLOADS_DIR,
   configDir: CONFIG_DIR,
   steamCmdPath: process.env.STEAMCMD_PATH || 'steamcmd'
+});
+
+const libraryManager = new LibraryManager({
+  configDir: CONFIG_DIR,
+  downloadsDir: DOWNLOADS_DIR
 });
 
 app.use(express.json());
@@ -129,6 +135,47 @@ app.get('/api/storage', async (req, res) => {
 // Presets list
 app.get('/api/presets', (req, res) => {
   res.json(getPresets());
+});
+
+// Library: Get all games in library
+app.get('/api/library', (req, res) => {
+  try {
+    const library = libraryManager.getLibrary();
+    res.json(library);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Library: Add a game
+app.post('/api/library', (req, res) => {
+  try {
+    const game = libraryManager.addGame(req.body);
+    res.json({ success: true, game });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// Library: Remove a game
+app.delete('/api/library/:appId', (req, res) => {
+  try {
+    libraryManager.removeGame(req.params.appId);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Library: Sync Steam user account
+app.post('/api/library/sync', async (req, res) => {
+  try {
+    const { identifier, apiKey } = req.body;
+    const result = await libraryManager.syncSteamLibrary(identifier, apiKey);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
 });
 
 // App Info details

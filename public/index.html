@@ -347,21 +347,57 @@
 
     <!-- MODAL 1: Steam Account Sync Modal -->
     <div id="sync-modal" class="modal-backdrop hidden">
-      <div class="modal-card">
+      <div class="modal-card modal-lg">
         <div class="modal-header">
           <h3>Sync Steam Account Library</h3>
           <button type="button" class="btn-icon" id="btn-close-sync-modal">&times;</button>
         </div>
         <div class="modal-body">
-          <p>Enter your Steam Username, Custom Vanity URL, or 64-bit Steam ID to load your owned games directly into VaporFetch.</p>
-          <div class="form-group">
-            <label for="sync-identifier" class="input-label">Steam Username / Vanity URL / SteamID64 <span class="required">*</span></label>
-            <input type="text" id="sync-identifier" placeholder="e.g. reaper360vr or 76561198..." class="form-input">
-            <small class="field-hint">Works automatically if your Steam profile game details are set to Public.</small>
+          <div class="radio-toggle-group" style="margin-bottom: 1.25rem;">
+            <label class="radio-card">
+              <input type="radio" name="syncMethod" value="web" checked>
+              <div class="radio-card-content">
+                <span class="radio-title">Steam Web API / Profile</span>
+                <span class="radio-desc">Sync using Steam Username, SteamID, or API Key</span>
+              </div>
+            </label>
+            <label class="radio-card">
+              <input type="radio" name="syncMethod" value="steamcmd">
+              <div class="radio-card-content">
+                <span class="radio-title">SteamCMD Account</span>
+                <span class="radio-desc">Direct session sync (works on private profiles)</span>
+              </div>
+            </label>
           </div>
-          <div class="form-group">
-            <label for="sync-apikey" class="input-label">Steam Web API Key <span class="badge-hint">Optional</span></label>
-            <input type="password" id="sync-apikey" placeholder="Optional (only needed if profile is private)" class="form-input">
+
+          <!-- Web Sync Box -->
+          <div id="sync-box-web">
+            <div class="form-group">
+              <label for="sync-identifier" class="input-label">Steam Username / Vanity URL / SteamID64 <span class="required">*</span></label>
+              <input type="text" id="sync-identifier" placeholder="e.g. reaper360vr or 76561198..." class="form-input">
+              <small class="field-hint">You can enter your custom vanity URL (reaper360vr), profile link, or 17-digit SteamID64.</small>
+            </div>
+            <div class="form-group">
+              <label for="sync-apikey" class="input-label">Steam Web API Key</label>
+              <input type="password" id="sync-apikey" placeholder="Enter API Key (required if game details are not public)" class="form-input">
+              <small class="field-hint">Get a free key from <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">steamcommunity.com/dev/apikey</a> (Domain can be anything like 'localhost').</small>
+            </div>
+            <div class="secure-notice" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;">
+              <strong>Tip:</strong> If your profile is private, set <em>Game Details</em> to <em>Public</em> in Steam (Profile &rarr; Edit Profile &rarr; Privacy Settings &rarr; Game details &rarr; Public).
+            </div>
+          </div>
+
+          <!-- SteamCMD Sync Box -->
+          <div id="sync-box-steamcmd" class="hidden">
+            <div class="form-group">
+              <label for="sync-cmd-username" class="input-label">Steam Username <span class="required">*</span></label>
+              <input type="text" id="sync-cmd-username" placeholder="e.g. reaper360vr" class="form-input">
+            </div>
+            <div class="form-group">
+              <label for="sync-cmd-password" class="input-label">Steam Password <span class="badge-hint">Optional if already cached</span></label>
+              <input type="password" id="sync-cmd-password" placeholder="Leave empty if logged in previously" class="form-input">
+              <small class="field-hint">SteamCMD will query all licenses owned by your account directly from Valve's servers.</small>
+            </div>
           </div>
         </div>
         <div class="modal-footer">

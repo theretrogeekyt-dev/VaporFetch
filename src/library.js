@@ -1,7 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
-const http = require('http');
+const { spawn } = require('child_process');
+const { getAppInfo } = require('./steamApi');
 
 // Built-in catalog of popular games and dedicated servers
 const DEFAULT_CATALOG = [
@@ -34,6 +35,7 @@ class LibraryManager {
   constructor(options = {}) {
     this.configDir = options.configDir || process.env.CONFIG_DIR || '/config';
     this.downloadsDir = options.downloadsDir || process.env.DOWNLOADS_DIR || '/downloads';
+    this.steamCmdPath = options.steamCmdPath || process.env.STEAMCMD_PATH || 'steamcmd';
     this.libraryFile = path.join(this.configDir, 'user_library.json');
     this.userGames = this.loadUserLibrary();
   }
@@ -62,10 +64,8 @@ class LibraryManager {
   }
 
   getLibrary() {
-    // Merge catalog and userGames by appId
     const map = new Map();
 
-    // Default catalog first
     for (const item of DEFAULT_CATALOG) {
       map.set(item.appId, {
         ...item,
@@ -74,7 +74,6 @@ class LibraryManager {
       });
     }
 
-    // User games overwrite/add
     for (const item of this.userGames) {
       map.set(item.appId, {
         ...item,
@@ -83,7 +82,6 @@ class LibraryManager {
       });
     }
 
-    // Inspect downloads directory to detect which games are already installed on NAS
     const installedFolders = new Set();
     try {
       if (fs.existsSync(this.downloadsDir)) {
@@ -118,7 +116,7 @@ class LibraryManager {
     const cleanGame = {
       appId,
       name: game.name || `App ${appId}`,
-      dir: game.dir || game.name.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
+      dir: game.dir || (game.name || appId).toLowerCase().replace(/[^a-z0-9]+/g, '_'),
       platform: game.platform || 'windows',
       anonymous: game.anonymous === true,
       type: game.type || 'game',
@@ -144,33 +142,104 @@ class LibraryManager {
   }
 
   /**
+   * Resolve vanity URL or profile link to a numeric 64-bit Steam ID
+   */
+  async resolveToSteamId64(identifier, apiKey) {
+    let clean = String(identifier || '').trim();
+    clean = clean.replace(/^https?:\/\/steamcommunity\.com\/(id|profiles)\//i, '').replace(/\/.*$/, '').trim();
+
+    if (/^\d{17}$/.test(clean)) {
+      return clean;
+    }
+
+    // 1. Steam Web API ResolveVanityURL
+    if (apiKey) {
+      try {
+        const url = `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/?key=${encodeURIComponent(apiKey)}&vanityurl=${encodeURIComponent(clean)}`;
+        const res = await this.httpGetJson(url);
+        if (res && res.response && res.response.success === 1 && res.response.steamid) {
+          return res.response.steamid;
+        }
+      } catch (err) {
+        console.warn('[VaporFetch] ResolveVanityURL error:', err.message);
+      }
+    }
+
+    // 2. Steam Community XML lookup
+    try {
+      const url = `https://steamcommunity.com/id/${encodeURIComponent(clean)}/?xml=1`;
+      const xml = await this.httpGetText(url);
+      const match = xml.match(/<steamID64>(\d{17})<\/steamID64>/i);
+      if (match) {
+        return match[1];
+      }
+    } catch (err) {
+      console.warn('[VaporFetch] Community XML lookup error:', err.message);
+    }
+
+    return null;
+  }
+
+  /**
    * Sync games from Steam Community profile or Steam Web API
    * @param {string} identifier - Steam Username, Custom Vanity URL, or SteamID64
    * @param {string} [apiKey] - Optional Steam Web API Key
    */
   async syncSteamLibrary(identifier, apiKey) {
-    const cleanId = String(identifier || '').trim();
-    if (!cleanId) {
+    let clean = String(identifier || '').trim();
+    if (!clean) {
       throw new Error('Steam username, vanity URL, or SteamID64 is required');
     }
 
+    clean = clean.replace(/^https?:\/\/steamcommunity\.com\/(id|profiles)\//i, '').replace(/\/.*$/, '').trim();
+
+    let steamId64 = /^\d{17}$/.test(clean) ? clean : null;
     let games = [];
+    const errors = [];
 
-    // Method 1: If API key and 64-bit Steam ID provided, use official Steam Web API
-    if (apiKey && /^\d{17}$/.test(cleanId)) {
-      games = await this.fetchViaWebApi(cleanId, apiKey);
+    // Step 1: Resolve vanity URL if needed
+    if (!steamId64) {
+      steamId64 = await this.resolveToSteamId64(clean, apiKey);
     }
 
-    // Method 2: If no games yet, attempt public Steam Community games XML
+    // Step 2: Fetch via Web API if API key is provided
+    if (apiKey) {
+      if (!steamId64) {
+        errors.push(`Could not resolve vanity URL "${clean}" to a 64-bit Steam ID. Check username or enter your 17-digit SteamID64 directly.`);
+      } else {
+        try {
+          games = await this.fetchViaWebApi(steamId64, apiKey);
+        } catch (err) {
+          errors.push(`Web API error: ${err.message}`);
+        }
+      }
+    }
+
+    // Step 3: Fallback to Steam Community games XML (no API key needed)
     if (!games || games.length === 0) {
-      games = await this.fetchViaCommunityXml(cleanId);
+      try {
+        const idToTry = steamId64 || clean;
+        const xmlGames = await this.fetchViaCommunityXml(idToTry);
+        if (xmlGames && xmlGames.length > 0) {
+          games = xmlGames;
+        }
+      } catch (err) {
+        errors.push(`Community XML error: ${err.message}`);
+      }
     }
 
+    // If still no games, provide clear instructions
     if (!games || games.length === 0) {
-      throw new Error(`Could not find public games for "${cleanId}". Make sure your Steam profile and game details are set to "Public", or provide a Steam Web API Key.`);
+      const details = errors.length > 0 ? `\nDetails: ${errors.join('\n')}` : '';
+      throw new Error(
+        `Failed to retrieve games for "${clean}".${details}\n\n` +
+        `Troubleshooting:\n` +
+        `1. If using an API key, enter your 17-digit SteamID64 (from your Steam account details or steamid.io).\n` +
+        `2. Ensure your Steam Privacy Settings are set to Public: In Steam, go to Profile -> Edit Profile -> Privacy Settings -> Set "Game details" to "Public" and uncheck "Always keep my total playtime private".\n` +
+        `3. Or use "Sync via SteamCMD" to fetch owned licenses directly with your Steam login.`
+      );
     }
 
-    // Merge discovered games into userGames
     let addedCount = 0;
     for (const g of games) {
       if (!this.userGames.some(existing => existing.appId === g.appId)) {
@@ -185,8 +254,107 @@ class LibraryManager {
       success: true,
       totalImported: games.length,
       newlyAdded: addedCount,
+      steamId64: steamId64 || clean,
       games: this.getLibrary()
     };
+  }
+
+  /**
+   * Sync games using SteamCMD +licenses_print
+   * Directly authenticates with Valve's Steam servers—bypasses profile privacy and API key requirements!
+   * @param {string} username
+   * @param {string} [password]
+   */
+  async syncViaSteamCmd(username, password) {
+    const user = (username || process.env.STEAM_USERNAME || '').trim();
+    if (!user) {
+      throw new Error('Steam username is required for SteamCMD license sync.');
+    }
+
+    const pass = password || process.env.STEAM_PASSWORD || '';
+    const args = [];
+
+    if (pass) {
+      args.push('+login', user, pass);
+    } else {
+      args.push('+login', user);
+    }
+
+    args.push('+licenses_print', '+quit');
+
+    return new Promise((resolve, reject) => {
+      let output = '';
+      let isError = false;
+
+      const proc = spawn(this.steamCmdPath, args, {
+        env: {
+          ...process.env,
+          HOME: this.configDir,
+          LC_ALL: 'C'
+        }
+      });
+
+      proc.stdout.on('data', chunk => output += chunk.toString());
+      proc.stderr.on('data', chunk => output += chunk.toString());
+
+      proc.on('close', async (code) => {
+        if (/Steam Guard code:/i.test(output) || /Two-factor code:/i.test(output)) {
+          return reject(new Error('Steam Guard 2FA is required. Please login once via a download task to cache your Steam Guard token, then retry.'));
+        }
+
+        if (/Invalid Password/i.test(output) || /Login Failure/i.test(output)) {
+          return reject(new Error('Steam login failure: Invalid username or password.'));
+        }
+
+        // Parse AppIDs from licenses_print output
+        // Patterns in SteamCMD: "License packageID 12345: AppID 2280 (DOOM + DOOM II)" or "- Package 123: AppID 2280"
+        const foundAppIds = new Set();
+        const appMatches = output.matchAll(/AppID\s*[:\s](\d+)(?:\s*\(([^)]+)\))?/gi);
+
+        for (const m of appMatches) {
+          const appId = m[1];
+          // Filter out internal tools / runtime IDs
+          if (parseInt(appId, 10) > 10) {
+            foundAppIds.add(appId);
+          }
+        }
+
+        if (foundAppIds.size === 0) {
+          return reject(new Error('No licenses found in SteamCMD output. Make sure the account owns games.'));
+        }
+
+        let addedCount = 0;
+        const appList = Array.from(foundAppIds);
+
+        // Batch inspect up to 50 games for names
+        for (const appId of appList.slice(0, 50)) {
+          if (!this.userGames.some(g => g.appId === appId)) {
+            const info = await getAppInfo(appId);
+            this.userGames.push({
+              appId,
+              name: info.name || `App ${appId}`,
+              dir: (info.name || appId).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''),
+              type: 'game',
+              platform: 'windows',
+              anonymous: false,
+              headerImage: info.headerImage || `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appId}/header.jpg`
+            });
+            addedCount++;
+          }
+        }
+
+        this.saveUserLibrary();
+
+        resolve({
+          success: true,
+          totalImported: foundAppIds.size,
+          newlyAdded: addedCount,
+          games: this.getLibrary()
+        });
+      });
+
+      proc.on('error', (err) => reject(new Error(`Failed to execute steamcmd: ${err.message}`)));
+    });
   }
 
   fetchViaCommunityXml(identifier) {
@@ -195,34 +363,14 @@ class LibraryManager {
       const urlPath = isSteamId64 ? `/profiles/${identifier}/games?tab=all&xml=1` : `/id/${identifier}/games?tab=all&xml=1`;
       const url = `https://steamcommunity.com${urlPath}`;
 
-      const options = {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 VaporFetch/1.0'
-        },
-        timeout: 10000
-      };
-
-      https.get(url, options, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          // Handle redirect
-          https.get(res.headers.location, options, (redirRes) => {
-            let data = '';
-            redirRes.on('data', chunk => data += chunk);
-            redirRes.on('end', () => resolve(this.parseGamesXml(data)));
-          }).on('error', () => resolve([]));
-          return;
-        }
-
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => resolve(this.parseGamesXml(data)));
-      }).on('error', () => resolve([]));
+      this.httpGetText(url).then(xml => {
+        resolve(this.parseGamesXml(xml));
+      }).catch(() => resolve([]));
     });
   }
 
   parseGamesXml(xmlText) {
     const games = [];
-    // Regex extract <game><appID>...</appID><name><![CDATA[...]]></name>
     const gameBlocks = xmlText.match(/<game>[\s\S]*?<\/game>/gi) || [];
 
     for (const block of gameBlocks) {
@@ -249,34 +397,89 @@ class LibraryManager {
   }
 
   fetchViaWebApi(steamId64, apiKey) {
-    return new Promise((resolve) => {
-      const url = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key=${encodeURIComponent(apiKey)}&steamid=${encodeURIComponent(steamId64)}&include_appinfo=1&format=json`;
+    return new Promise((resolve, reject) => {
+      const url = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key=${encodeURIComponent(apiKey)}&steamid=${encodeURIComponent(steamId64)}&include_appinfo=1&include_played_free_games=1&format=json`;
 
-      https.get(url, { timeout: 10000 }, (res) => {
+      https.get(url, { headers: { 'User-Agent': 'VaporFetch/1.0' }, timeout: 15000 }, (res) => {
+        if (res.statusCode === 403) {
+          return reject(new Error('HTTP 403 Forbidden: Invalid Steam Web API Key.'));
+        }
+        if (res.statusCode === 400) {
+          return reject(new Error('HTTP 400 Bad Request: Invalid SteamID parameter.'));
+        }
+        if (res.statusCode !== 200) {
+          return reject(new Error(`HTTP ${res.statusCode} from Steam API.`));
+        }
+
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
           try {
             const parsed = JSON.parse(data);
-            if (parsed.response && Array.isArray(parsed.response.games)) {
-              const list = parsed.response.games.map(g => ({
-                appId: String(g.appid),
-                name: g.name,
-                dir: g.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''),
-                type: 'game',
-                platform: 'windows',
-                anonymous: false,
-                headerImage: `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${g.appid}/header.jpg`
-              }));
-              return resolve(list);
+            if (parsed.response) {
+              if (Array.isArray(parsed.response.games) && parsed.response.games.length > 0) {
+                const list = parsed.response.games.map(g => ({
+                  appId: String(g.appid),
+                  name: g.name || `App ${g.appid}`,
+                  dir: (g.name || String(g.appid)).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''),
+                  type: 'game',
+                  platform: 'windows',
+                  anonymous: false,
+                  headerImage: `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${g.appid}/header.jpg`
+                }));
+                return resolve(list);
+              } else {
+                return reject(new Error('Steam returned an empty game list. In Steam Privacy Settings, please verify "Game details" is set to "Public" and uncheck "Always keep playtime private".'));
+              }
             }
-          } catch (e) {}
-          resolve([]);
+            reject(new Error('Invalid response structure from Steam Web API.'));
+          } catch (e) {
+            reject(new Error(`Failed to parse Steam API response: ${e.message}`));
+          }
         });
-      }).on('error', () => resolve([]));
+      }).on('error', (err) => reject(new Error(`Network error contacting Steam API: ${err.message}`)));
+    });
+  }
+
+  httpGetJson(url) {
+    return new Promise((resolve, reject) => {
+      https.get(url, { headers: { 'User-Agent': 'VaporFetch/1.0' }, timeout: 10000 }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }).on('error', reject);
+    });
+  }
+
+  httpGetText(url) {
+    return new Promise((resolve, reject) => {
+      const options = {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 VaporFetch/1.0'
+        },
+        timeout: 10000
+      };
+      https.get(url, options, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          https.get(res.headers.location, options, (redirRes) => {
+            let data = '';
+            redirRes.on('data', chunk => data += chunk);
+            redirRes.on('end', () => resolve(data));
+          }).on('error', reject);
+          return;
+        }
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => resolve(data));
+      }).on('error', reject);
     });
   }
 }
 
 module.exports = LibraryManager;
-

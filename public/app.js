@@ -326,34 +326,85 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // Sync Modal Method Toggle
+  const syncMethodRadios = document.querySelectorAll('input[name="syncMethod"]');
+  const syncBoxWeb = document.getElementById('sync-box-web');
+  const syncBoxSteamCmd = document.getElementById('sync-box-steamcmd');
+  const syncCmdUsername = document.getElementById('sync-cmd-username');
+  const syncCmdPassword = document.getElementById('sync-cmd-password');
+
+  syncMethodRadios.forEach(r => {
+    r.addEventListener('change', () => {
+      if (r.value === 'steamcmd') {
+        syncBoxSteamCmd.classList.remove('hidden');
+        syncBoxWeb.classList.add('hidden');
+      } else {
+        syncBoxWeb.classList.remove('hidden');
+        syncBoxSteamCmd.classList.add('hidden');
+      }
+    });
+  });
+
   // Sync Steam Account Submit
   btnSubmitSync.addEventListener('click', async () => {
-    const identifier = syncIdentifier.value.trim();
-    if (!identifier) {
-      alert('Please enter your Steam username, vanity URL, or SteamID64.');
-      return;
-    }
+    const method = document.querySelector('input[name="syncMethod"]:checked')?.value || 'web';
 
     btnSubmitSync.disabled = true;
     btnSubmitSync.textContent = 'Syncing...';
 
     try {
-      const res = await fetch('/api/library/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          identifier,
-          apiKey: syncApiKey.value.trim()
-        })
-      });
-      const data = await res.json();
+      if (method === 'steamcmd') {
+        const username = syncCmdUsername.value.trim();
+        if (!username) {
+          alert('Please enter your Steam username.');
+          btnSubmitSync.disabled = false;
+          btnSubmitSync.textContent = 'Sync Games';
+          return;
+        }
 
-      if (data.success) {
-        syncModal.classList.add('hidden');
-        alert(`Sync complete! Found ${data.totalImported} games (${data.newlyAdded} newly added).`);
-        fetchLibrary();
+        const res = await fetch('/api/library/sync-steamcmd', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username,
+            password: syncCmdPassword.value
+          })
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          syncModal.classList.add('hidden');
+          alert(`SteamCMD Sync complete! Found ${data.totalImported} game licenses owned by your account.`);
+          fetchLibrary();
+        } else {
+          alert(`SteamCMD Sync failed:\n${data.error}`);
+        }
       } else {
-        alert(`Sync error: ${data.error}`);
+        const identifier = syncIdentifier.value.trim();
+        if (!identifier) {
+          alert('Please enter your Steam username, vanity URL, or SteamID64.');
+          btnSubmitSync.disabled = false;
+          btnSubmitSync.textContent = 'Sync Games';
+          return;
+        }
+
+        const res = await fetch('/api/library/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            identifier,
+            apiKey: syncApiKey.value.trim()
+          })
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          syncModal.classList.add('hidden');
+          alert(`Sync complete! Found ${data.totalImported} games (${data.newlyAdded} newly added to your library).`);
+          fetchLibrary();
+        } else {
+          alert(`Sync failed:\n${data.error}`);
+        }
       }
     } catch (err) {
       alert(`Sync failed: ${err.message}`);

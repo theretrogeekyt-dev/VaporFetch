@@ -167,11 +167,22 @@ app.delete('/api/library/:appId', (req, res) => {
   }
 });
 
-// Library: Sync Steam user account
+// Library: Sync Steam user account via Web API / Community
 app.post('/api/library/sync', async (req, res) => {
   try {
     const { identifier, apiKey } = req.body;
     const result = await libraryManager.syncSteamLibrary(identifier, apiKey);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// Library: Sync Steam licenses directly via SteamCMD account session
+app.post('/api/library/sync-steamcmd', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const result = await libraryManager.syncViaSteamCmd(username, password);
     res.json(result);
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });

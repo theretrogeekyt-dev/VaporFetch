@@ -165,6 +165,47 @@ KNOWN_NON_GAMES: Dict[int, str] = {
     1192380: "Stop Sign VR",
     908520: "fpsVR",
     382110: "Virtual Desktop",
+    # Steam system apps and utilities
+    202355: "Remote Play Client",
+    364: "HL1:MP Linux client",
+    410: "Portal: First Slice",  # Demo
+    760: "Steam Screenshots",
+    761: "Steam Cloud - Videos",
+    764: "Steam Cloud - User Logs",
+    765: "Greenlight",
+    766: "Steam Workshop",
+    767: "Steam Artwork",
+    92: "Codename Gordon",  # Demo
+    # RetroArch emulators and cores
+    1205330: "RetroArch - Mesen",
+    1205580: "RetroArch - SameBoy",
+    1222630: "Beetle PSX",
+    1222631: "bsnes",
+    1222632: "RetroArch - Final Burn Neo",
+    1222633: "Flycast",
+    1222634: "RetroArch - Mesen S",
+    1222635: "RetroArch - Nestopia",
+    1222637: "RetroArch - TIC-80",
+    1222638: "EasyRPG",
+    1227440: "Mupen64Plus-Next",
+    1227441: "RetroArch - Kronos",
+    1227442: "RetroArch - Theodore",
+    1227443: "RetroArch - Stella",
+    1227444: "Snes9x",
+    1227448: "RetroArch - mGBA",
+    1227449: "RetroArch - Genesis Plus GX",
+    1227450: "GW",
+    1227452: "RetroArch - BlastEm",
+    1227453: "RetroArch - RACE",
+    1227454: "caprice32",
+    1227455: "VBA-M",
+    1227456: "RetroArch - NeoCD",
+    1227457: "RetroArch - FreeIntv",
+    1227458: "FreeChaF",
+    1227459: "QuickNES",
+    1227460: "Picodrive",
+    1227461: "PCSX ReARMed",
+    1227463: "RetroArch - PX68K",
     # Known Mods
     17500: "Zombie Panic! Source",
     17510: "Age of Chivalry",
@@ -191,6 +232,33 @@ KNOWN_NON_GAMES: Dict[int, str] = {
     1014940: "Nehrim: At Fate's Edge",
     1467450: "The Chronicles of Myrtana: Archolos",
     1583720: "Entropy : Zero 2",
+    1761270: "Half-Life: MMod",
+    # Ownership and partial content
+    635640: "Half-Life Ownership",
+    642920: "Half-Life - The Freeman Chronicles",
+    646170: "The Freeman Chronicles: Episode 1",
+    646171: "The Freeman Chronicles: Episode 2: Part 1",
+    678350: "Half-Life - The Freeman Chronicles: BTS",
+    1004410: "Half-Life - The Freeman Chronicles: Episode 2: Part 2",
+    1098290: "DOOM Eternal - Single Player Campaign",
+    1098292: "DOOM Eternal: The Ancient Gods - Part One",
+    1098293: "DOOM Eternal: The Ancient Gods - Part Two",
+    2545650: "DOOM Eternal: idStudio",
+    # Demos and Pre-release
+    1092700: "Hello Neighbor Pre-Alpha",
+    1092710: "Hello Neighbor Alpha 1",
+    1092720: "Hello Neighbor Alpha 2",
+    1092730: "Hello Neighbor Alpha 3",
+    1096710: "Hello Neighbor Alpha 4",
+    1364960: "Hello Neighbor 2 Alpha 1.5",
+    1373880: "Hello Neighbor 2 Alpha 1",
+    # VR/Experimental
+    868020: "Aperture Hand Lab",
+    446750: "Portal Stories: VR",
+    650000: "DOOM VFR",
+    2012840: "Portal with RTX",
+    2477290: "Half-Life 2 RTX",
+    1089130: "Quake II RTX",
 }
 # Backward compatibility alias
 KNOWN_TOOLS = KNOWN_NON_GAMES
@@ -414,6 +482,69 @@ def is_tool_or_non_game(appid: int, name: str, app_type: Optional[str] = None) -
         or " - ost" in lower
         or "playtest" in lower
         or "trailer" in lower
+        or " - pre-alpha" in lower
+        or " pre-alpha" in lower
+        or " (pre-alpha)" in lower
+    ):
+        return True
+
+    # 8b. Emulators and Emulator Cores
+    if (
+        "retroarch" in lower
+        or "emulator" in lower
+        or "emulators" in lower
+        or "mesen" in lower
+        or "sameboy" in lower
+        or "beetle psx" in lower
+        or "bsnes" in lower
+        or "flycast" in lower
+        or "nestopia" in lower
+        or "tic-80" in lower
+        or "easyrpg" in lower
+        or "mupen64" in lower
+        or "kronos" in lower
+        or "stella" in lower
+        or "snes9x" in lower
+        or "mgba" in lower
+        or "genesis plus" in lower
+        or "blastem" in lower
+        or "caprice32" in lower
+        or "vba-m" in lower
+        or "neocd" in lower
+        or "freeintv" in lower
+        or "quicknes" in lower
+        or "picodrive" in lower
+        or "pcsx" in lower
+        or "px68k" in lower
+    ):
+        return True
+
+    # 8c. Steam System & Platform Apps
+    if (
+        "steam cloud" in lower
+        or "steam screenshots" in lower
+        or "steam workshop" in lower
+        or "steam artwork" in lower
+        or "remote play" in lower
+        or "greenlight" in lower
+        or lower.startswith("steam ")
+    ):
+        return True
+
+    # 8d. Ownership and License Markers
+    if (
+        "ownership" in lower
+        or "license marker" in lower
+        or "registered" in lower
+        or lower.endswith(" - ownership")
+    ):
+        return True
+
+    # 8e. Client Tools and System Packages
+    if (
+        "linux client" in lower
+        or lower.endswith(" client")
+        or lower.endswith(" (client)")
     ):
         return True
 

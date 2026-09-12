@@ -720,7 +720,16 @@ document.addEventListener("DOMContentLoaded", () => {
   const CLIENT_ALLOWED_GAMES = new Set([4000, 362890]); // Garry's Mod, Black Mesa
 
   const CLIENT_KNOWN_NON_GAMES = new Set([
-    4, 5, 7, 8, 9, 90, 97, 105, 115, 205, 215, 218, 225, 245, 255, 513, 563, 564, 575, 576, 629, 644, 746,
+    4, 5, 7, 8, 9, 90, 92, 97, 105, 115, 202355, 205, 215, 218, 225, 245, 255, 364, 410, 513, 563, 564, 575, 576, 629, 644, 746,
+    760, 761, 764, 765, 766, 767,  // Steam system apps
+    635640,  // Half-Life Ownership
+    642920, 646170, 646171, 678350, 1004410,  // Freeman Chronicles
+    1098290, 1098292, 1098293, 2545650,  // DOOM Eternal partial content
+    1092700, 1092710, 1092720, 1092730, 1096710, 1364960, 1373880,  // Hello Neighbor pre-release
+    868020, 446750, 650000, 2012840, 2477290, 1089130,  // VR/RTX
+    1205330, 1205580, 1222630, 1222631, 1222632, 1222633, 1222634, 1222635, 1222637, 1222638,  // RetroArch cores
+    1227440, 1227441, 1227442, 1227443, 1227444, 1227448, 1227449, 1227450, 1227452, 1227453, 1227454, 1227455, 1227456, 1227457, 1227458, 1227459, 1227460, 1227461, 1227463,  // More emulators
+    1761270,  // Half-Life MMod
     1840, 17500, 17510, 17520, 17530, 17550, 17570, 17730, 72850, 202690, 217370, 218350, 220700, 221380,
     223710, 223850, 227260, 228980, 235780, 235900, 243750, 244630, 250820, 258380, 280740, 286010, 286080,
     290930, 317400, 323910, 356530, 362870, 363890, 365300, 365670, 367670, 382110, 383730, 388080, 397460,
@@ -884,7 +893,73 @@ document.addEventListener("DOMContentLoaded", () => {
       lower.includes(" (ost)") ||
       lower.includes(" - ost") ||
       lower.includes("playtest") ||
-      lower.includes("trailer")
+      lower.includes("trailer") ||
+      lower.includes(" - pre-alpha") ||
+      lower.includes(" pre-alpha") ||
+      lower.includes(" (pre-alpha)")
+    ) {
+      return true;
+    }
+
+    // Emulators and emulator cores
+    if (
+      lower.includes("retroarch") ||
+      lower.includes("emulator") ||
+      lower.includes("mesen") ||
+      lower.includes("sameboy") ||
+      lower.includes("beetle psx") ||
+      lower.includes("bsnes") ||
+      lower.includes("flycast") ||
+      lower.includes("nestopia") ||
+      lower.includes("tic-80") ||
+      lower.includes("easyrpg") ||
+      lower.includes("mupen64") ||
+      lower.includes("kronos") ||
+      lower.includes("stella") ||
+      lower.includes("snes9x") ||
+      lower.includes("mgba") ||
+      lower.includes("genesis plus") ||
+      lower.includes("blastem") ||
+      lower.includes("caprice32") ||
+      lower.includes("vba-m") ||
+      lower.includes("neocd") ||
+      lower.includes("freeintv") ||
+      lower.includes("quicknes") ||
+      lower.includes("picodrive") ||
+      lower.includes("pcsx") ||
+      lower.includes("px68k")
+    ) {
+      return true;
+    }
+
+    // Steam system and platform apps
+    if (
+      lower.includes("steam cloud") ||
+      lower.includes("steam screenshots") ||
+      lower.includes("steam workshop") ||
+      lower.includes("steam artwork") ||
+      lower.includes("remote play") ||
+      lower.includes("greenlight") ||
+      lower.startsWith("steam ")
+    ) {
+      return true;
+    }
+
+    // Ownership and license markers
+    if (
+      lower.includes("ownership") ||
+      lower.includes("license marker") ||
+      lower.includes("registered") ||
+      lower.includes(" - ownership")
+    ) {
+      return true;
+    }
+
+    // Client tools and system packages
+    if (
+      lower.includes("linux client") ||
+      lower.endsWith(" client") ||
+      lower.endsWith(" (client)")
     ) {
       return true;
     }

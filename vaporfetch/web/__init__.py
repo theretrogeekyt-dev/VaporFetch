@@ -1,4 +1,0 @@
-"""
-VaporFetch Web Server package.
-"""
-

@@ -315,8 +315,50 @@ def write_steam_login_config(
             logger.debug(f"Could not write Steam config in {base}: {e}")
 
 
+def sync_steamcmd_sentry_files() -> None:
+    """
+    Ensure SteamCMD sentry files (ssfn*) are synchronized across all Steam directories
+    and persistent storage locations so credentials persist across Docker container updates.
+    """
+    search_dirs = [
+        Path("/opt/steamcmd"),
+        DATA_DIR / "steam",
+        DATA_DIR / "steam" / ".steam" / "steam",
+        DATA_DIR / "steam" / "Steam",
+        Path.home() / ".steam" / "steam",
+        Path.home() / "Steam",
+    ]
+    sentry_files = []
+    for d in search_dirs:
+        if d.exists():
+            try:
+                for f in d.glob("ssfn*"):
+                    if f.is_file() and f.stat().st_size > 0:
+                        sentry_files.append(f)
+            except Exception:
+                pass
+
+    dest_dirs = [
+        DATA_DIR / "steam",
+        DATA_DIR / "steam" / ".steam" / "steam",
+        DATA_DIR / "steam" / "Steam",
+        Path("/opt/steamcmd"),
+    ]
+    for sf in sentry_files:
+        for dest in dest_dirs:
+            if dest.exists():
+                try:
+                    if sf.parent.resolve() != dest.resolve():
+                        target = dest / sf.name
+                        if not target.exists() or target.stat().st_size != sf.stat().st_size:
+                            shutil.copy2(sf, target)
+                except Exception:
+                    pass
+
+
 def has_steamcmd_cached_credentials(username: str = "") -> bool:
     """Check if SteamCMD has existing cached login tokens on disk for username."""
+    sync_steamcmd_sentry_files()
     uname = username.strip().lower() if username else ""
 
 
@@ -663,6 +705,7 @@ def _monitor_login_pty():
 
         # Mark as logged in IMMEDIATELY so the frontend transitions instantly
         save_current_session(auth_session.username, logged_in=True, steam_id=steam_id, auth_method="steamcmd")
+        sync_steamcmd_sentry_files()
         try:
             subprocess.run(["chmod", "-R", "a+rwX", str(DATA_DIR / "steam")], check=False)
         except Exception:
@@ -997,6 +1040,7 @@ def submit_2fa_code(code: str) -> Dict[str, Any]:
                     except Exception:
                         pass
                 save_current_session(username, logged_in=True, steam_id=steam_id, auth_method="steamcmd")
+                sync_steamcmd_sentry_files()
                 owned_app_ids = parse_licenses_output(out)
                 if owned_app_ids:
                     try:
@@ -1288,6 +1332,9 @@ def run_app_download(
     active_user = username or session.get("username", "")
     pwd = auth_session.pending_password if auth_session.username == active_user else None
 
+    # Sync sentry files to ensure tickets are available across storage paths
+    sync_steamcmd_sentry_files()
+
     # Verify credentials exist before launching SteamCMD
     has_cached = has_steamcmd_cached_credentials(active_user)
     is_steamcmd_auth = bool(session.get("logged_in") and session.get("auth_method") == "steamcmd")
@@ -1311,6 +1358,10 @@ def run_app_download(
     safe_install_dir = re.sub(r'\+', '_', install_dir)
     try:
         os.makedirs(safe_install_dir, exist_ok=True)
+        try:
+            os.chmod(safe_install_dir, 0o777)
+        except Exception:
+            pass
     except Exception as e:
         logger.warning(f"Could not pre-create directory {safe_install_dir}: {e}")
 
@@ -1323,9 +1374,10 @@ def run_app_download(
     if platform and platform.lower() in ("windows", "linux", "macos"):
         cmd.extend(["+@sSteamCmdForcePlatformType", platform.lower()])
 
+    # Valve requirement: force_install_dir MUST precede login
     cmd.extend([
-        "+login", active_user,
         "+force_install_dir", safe_dir_arg,
+        "+login", active_user,
     ])
 
     if validate:
@@ -1543,7 +1595,7 @@ def run_app_download(
                                 proc.stdin.flush()
                         except Exception:
                             pass
-                elif "ERROR (" in line_str or "FAILED (" in line_str:
+                elif any(k in line_str.upper() for k in ("ERROR!", "ERROR (", "ERROR:", "ERROR ", "FAILED (", "FAILED:", "FAILED(", "FAILED ")):
                     error_message = line_str
 
                 # Check progress
@@ -1563,8 +1615,27 @@ def run_app_download(
                         last_time = now
                         progress_cb(parsed_prog)
 
+        # Drain and process any residual output left in accum
+        residual_lines = accum.splitlines()
+        for line in residual_lines:
+            line_str = line.strip()
+            if not line_str:
+                continue
+            if pwd and pwd in line_str:
+                continue
+            if log_cb:
+                log_cb(line_str)
+            if RE_APP_SUCCESS.search(line_str):
+                success = True
+            err_match = RE_APP_ERROR.search(line_str)
+            if err_match:
+                error_message = err_match.group(2)
+            elif any(k in line_str.upper() for k in ("ERROR!", "ERROR (", "ERROR:", "ERROR ", "FAILED (", "FAILED:", "FAILED(", "FAILED ")):
+                error_message = line_str
+
         retcode = proc.poll()
         if retcode == 0 or success:
+            sync_steamcmd_sentry_files()
             return {"success": True, "error": None}
         else:
             if not error_message:
@@ -1581,19 +1652,24 @@ def run_app_download(
                                 tail = [l.strip() for l in f.readlines() if l.strip()]
                                 # Filter out benign hardware / crash handler / startup warning messages
                                 benign_patterns = (
+                                    "minidumps folder is set to",
+                                    "redirecting stderr to",
                                     "flock /sys/devices",
-                                    "LOCK_SH failed",
-                                    "Installing breakpad exception handler",
+                                    "lock_sh failed",
+                                    "installing breakpad exception handler",
                                     "glibc >= 2.15",
                                     "crash_reporter",
-                                    "UpdateUI: skip show logo",
-                                    "Checking for available updates",
-                                    "Download complete",
-                                    "Verifying installation",
+                                    "updateui: skip show logo",
+                                    "checking for available updates",
+                                    "download complete",
+                                    "verifying installation",
+                                    "steambootstrapper",
+                                    "ilocalize::addfile()",
+                                    "steam console client",
                                 )
                                 relevant = [
                                     l for l in tail
-                                    if not any(bp.lower() in l.lower() for bp in benign_patterns)
+                                    if not any(bp in l.lower() for bp in benign_patterns)
                                 ]
                                 err_text = relevant[-1] if relevant else ""
                                 if err_text:
@@ -1609,6 +1685,28 @@ def run_app_download(
                                     break
                         except Exception:
                             pass
+
+            # If still empty, check logged output history or residual lines for failure cues
+            if not error_message:
+                for line in reversed(residual_lines):
+                    l_str = line.strip()
+                    if l_str and not any(bp in l_str.lower() for bp in ("redirecting stderr", "checking for available updates", "verifying installation", "minidumps folder")):
+                        error_message = f"SteamCMD: {l_str} (exit code {retcode})"
+                        break
+
+            # Translate known SteamCMD failure patterns to user-friendly messages
+            if error_message:
+                lower_err = error_message.lower()
+                if "cached credentials not found" in lower_err or "invalid password" in lower_err or "not logged on" in lower_err or "logon failure" in lower_err:
+                    error_message = (
+                        f"Steam credentials expired or missing for '{active_user}'. "
+                        "Please click 'Account' -> 'Sign In' to reconnect."
+                    )
+                elif "no subscription" in lower_err:
+                    error_message = f"Steam account '{active_user}' does not have a license / subscription for AppID {appid}."
+                elif "rate limit exceeded" in lower_err:
+                    error_message = "Steam rate limit exceeded. Please wait a few minutes before retrying."
+
             return {
                 "success": False,
                 "error": error_message or f"SteamCMD process exited with code {retcode}",

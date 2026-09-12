@@ -132,6 +132,9 @@ class TestDownloader(unittest.TestCase):
             # Ensure @sSteamCmdForcePlatformType precedes +login per Valve specification
             self.assertIn("+@sSteamCmdForcePlatformType", called_cmd)
             self.assertLess(called_cmd.index("+@sSteamCmdForcePlatformType"), called_cmd.index("+login"))
+            # Ensure force_install_dir precedes +login per Valve specification
+            self.assertIn("+force_install_dir", called_cmd)
+            self.assertLess(called_cmd.index("+force_install_dir"), called_cmd.index("+login"))
 
     def test_run_app_download_success_flow(self):
         from unittest.mock import patch, MagicMock
@@ -180,6 +183,7 @@ class TestDownloader(unittest.TestCase):
             fake_stderr = Path(tmpdir) / ".steam" / "steam" / "logs" / "stderr.txt"
             fake_stderr.parent.mkdir(parents=True, exist_ok=True)
             fake_stderr.write_text(
+                "09/12 15:30:12 minidumps folder is set to /tmp/dumps01\n"
                 "flock /sys/devices/virtual/dmi/id/sys_vendor LOCK_SH failed. errno = 13\n"
                 "09/11 23:06:52 Init: Installing breakpad exception handler for appid(steam)/version(1788292693)/tid(91)\n"
                 "UpdateUI: skip show logo\n",
@@ -199,6 +203,7 @@ class TestDownloader(unittest.TestCase):
                 self.assertFalse(res["success"])
                 # Breakpad banner and hardware locks should be filtered out
                 self.assertNotIn("Installing breakpad exception handler", res["error"])
+                self.assertNotIn("minidumps folder is set to", res["error"])
                 self.assertNotIn("flock /sys/devices", res["error"])
                 self.assertIn("SteamCMD process exited with code 254", res["error"])
 
@@ -269,6 +274,29 @@ class TestDownloader(unittest.TestCase):
             with open(target, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self.assertEqual(data, {"recovered": True})
+
+    def test_sync_steamcmd_sentry_files(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from vaporfetch.steamcmd import sync_steamcmd_sentry_files
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src_dir = Path(tmpdir) / "opt" / "steamcmd"
+            src_dir.mkdir(parents=True, exist_ok=True)
+            dst_dir = Path(tmpdir) / "data" / "steam"
+            dst_dir.mkdir(parents=True, exist_ok=True)
+
+            sentry_file = src_dir / "ssfn123456789"
+            sentry_file.write_bytes(b"mock_sentry_data")
+
+            with patch("vaporfetch.steamcmd.DATA_DIR", Path(tmpdir) / "data"), \
+                 patch("vaporfetch.steamcmd.Path", side_effect=lambda p: src_dir if str(p) == "/opt/steamcmd" else Path(p)):
+                sync_steamcmd_sentry_files()
+
+            target_in_data = dst_dir / "ssfn123456789"
+            self.assertTrue(target_in_data.exists())
+            self.assertEqual(target_in_data.read_bytes(), b"mock_sentry_data")
 
 if __name__ == "__main__":
     unittest.main()

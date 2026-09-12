@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 from typing import Dict, Any
 
-VERSION = "1.2.2"
+VERSION = "1.2.3"
 
 # Base directories
 def is_in_docker() -> bool:

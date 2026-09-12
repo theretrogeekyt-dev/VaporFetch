@@ -55,6 +55,20 @@ if [ -f /opt/steamcmd/linux64/steamclient.so ]; then
     ln -sf /opt/steamcmd/linux64/steamclient.so "${STEAM_DIR}/.steam/sdk64/steamclient.so" || true
 fi
 
+# 5b. Persist SteamCMD sentry files (ssfn*) across container updates
+for f in "${STEAM_DIR}"/ssfn* "${STEAM_DIR}/.steam/steam"/ssfn* "${STEAM_DIR}/Steam"/ssfn*; do
+    if [ -f "$f" ]; then
+        cp -f "$f" /opt/steamcmd/ 2>/dev/null || true
+    fi
+done
+for f in /opt/steamcmd/ssfn*; do
+    if [ -f "$f" ]; then
+        cp -f "$f" "${STEAM_DIR}/" 2>/dev/null || true
+        cp -f "$f" "${STEAM_DIR}/.steam/steam/" 2>/dev/null || true
+        cp -f "$f" "${STEAM_DIR}/Steam/" 2>/dev/null || true
+    fi
+done
+
 # 6. Pre-seed Steam update packages to avoid initial download delay
 if [ -d /opt/steamcmd/package ] && [ ! -d "${STEAM_DIR}/Steam/package" ]; then
     cp -r /opt/steamcmd/package "${STEAM_DIR}/Steam/package" 2>/dev/null || true

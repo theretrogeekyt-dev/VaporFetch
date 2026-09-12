@@ -1,9 +1,0 @@
-node_modules
-downloads
-config
-.git
-.gitignore
-.DS_Store
-*.log
-test
-

@@ -370,14 +370,21 @@
         </div>
 
         <div class="form-group" style="margin-top: 14px;">
-          <label for="cfgGoldberg">DRM-Free Offline Wrapper (Goldberg Emulator)</label>
-          <div class="checkbox-row">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <label for="cfgGoldberg" style="margin-bottom: 0;">DRM-Free Offline Wrapper (Goldberg)</label>
+            <span id="goldbergBinStatus" style="font-size: 0.75rem; color: var(--text-secondary);">Checking...</span>
+          </div>
+          <div class="checkbox-row" style="margin-top: 6px;">
             <input type="checkbox" id="cfgGoldberg">
             <label for="cfgGoldberg">Auto-apply Goldberg Emulator to downloaded games</label>
           </div>
           <small class="form-hint">
             Replaces <code>steam_api(64).dll</code> with Goldberg emulator and generates <code>steam_appid.txt</code> so supported games launch offline without the Steam client. Authentic DLLs are saved as <code>.orig</code>.
           </small>
+          <div id="goldbergMissingAlert" style="display: none; margin-top: 8px; padding: 8px 10px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; font-size: 0.8rem; color: #fca5a5; display: flex; justify-content: space-between; align-items: center;">
+            <span>⚠️ Emulator DLLs missing.</span>
+            <button type="button" id="btnDownloadGoldberg" class="btn btn-xs btn-outline" onclick="downloadGoldbergBinaries()">Download Now</button>
+          </div>
         </div>
 
         <div class="form-divider">

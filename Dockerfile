@@ -50,11 +50,9 @@ RUN /steamcmd/steamcmd.sh +quit || true \
 
 # Pre-download Goldberg Steam Emulator binaries for offline play support
 RUN mkdir -p /app/assets/goldberg \
-    && (curl -fsSL "https://github.com/Detanup01/gbe_fork/releases/latest/download/goldberg_emulator.zip" -o /tmp/goldberg.zip \
-        && unzip -q /tmp/goldberg.zip "*steam_api.dll" "*steam_api64.dll" -d /tmp/gbe_extracted 2>/dev/null \
-        && find /tmp/gbe_extracted -name "steam_api.dll" -exec cp {} /app/assets/goldberg/ \; \
-        && find /tmp/gbe_extracted -name "steam_api64.dll" -exec cp {} /app/assets/goldberg/ \; \
-        && rm -rf /tmp/goldberg.zip /tmp/gbe_extracted || true) || true
+    && (curl -fsSL "https://gitlab.com/Mr_Goldberg/goldberg_emulator/-/jobs/4247811310/artifacts/download" -o /tmp/goldberg.zip \
+        && unzip -q /tmp/goldberg.zip "steam_api.dll" "steam_api64.dll" -d /app/assets/goldberg/ 2>/dev/null \
+        && rm -rf /tmp/goldberg.zip || true) || true
 
 # Set up Python virtual environment
 RUN python3 -m venv /opt/venv

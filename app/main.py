@@ -349,6 +349,12 @@ async def apply_goldberg(appid: int):
     account_name = settings.get("steamcmd_username") or "Player"
     await goldberg_manager.ensure_binaries()
 
+    if not goldberg_manager.is_available():
+        raise HTTPException(
+            status_code=500,
+            detail="Goldberg emulator binaries (steam_api.dll / steam_api64.dll) could not be downloaded or found. Please place them into your NAS data folder under 'goldberg/' or check container internet connectivity."
+        )
+
     try:
         res = goldberg_manager.apply(target_dir, appid=appid, account_name=account_name)
         return res
@@ -366,4 +372,24 @@ async def revert_goldberg(appid: int):
         return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/goldberg/status")
+async def get_goldberg_system_status():
+    is_ready = goldberg_manager.is_available()
+    return {
+        "available": is_ready,
+        "dll32_path": str(goldberg_manager.dll32_path) if is_ready else None,
+        "dll64_path": str(goldberg_manager.dll64_path) if is_ready else None,
+        "data_dir": str(goldberg_manager.dir)
+    }
+
+@app.post("/api/goldberg/download")
+async def trigger_goldberg_download():
+    success = await goldberg_manager.ensure_binaries()
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to download Goldberg binaries from online mirrors. Check your container internet connection or manually place steam_api.dll and steam_api64.dll in your /app/data/goldberg directory."
+        )
+    return {"success": True, "message": "Goldberg binaries downloaded and ready."}
 

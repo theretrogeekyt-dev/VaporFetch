@@ -800,8 +800,56 @@ async function openSettingsModal() {
       document.getElementById("cfgPassword").value = cfg.steamcmd_password || "";
       document.getElementById("cfgCustomArgs").value = cfg.custom_steamcmd_args || "";
     }
+    checkGoldbergStatus();
   } catch (e) {
     console.warn("Could not load settings:", e);
+  }
+}
+
+async function checkGoldbergStatus() {
+  const badge = document.getElementById("goldbergBinStatus");
+  const alertBox = document.getElementById("goldbergMissingAlert");
+  if (!badge) return;
+  try {
+    const res = await fetch("/api/goldberg/status");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.available) {
+        badge.innerHTML = '<span style="color:var(--accent-success); font-weight:600;">● Ready</span>';
+        if (alertBox) alertBox.style.display = "none";
+      } else {
+        badge.innerHTML = '<span style="color:var(--accent-danger); font-weight:600;">● Missing</span>';
+        if (alertBox) alertBox.style.display = "flex";
+      }
+    }
+  } catch (e) {
+    console.warn("Could not check goldberg status:", e);
+  }
+}
+
+async function downloadGoldbergBinaries() {
+  const btn = document.getElementById("btnDownloadGoldberg");
+  const origText = btn ? btn.textContent : "Download Now";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Downloading...";
+  }
+  try {
+    const res = await fetch("/api/goldberg/download", { method: "POST" });
+    if (res.ok) {
+      showToast("Goldberg emulator DLLs downloaded successfully!");
+      checkGoldbergStatus();
+    } else {
+      const err = await res.json();
+      showToast(err.detail || "Download failed. Check container internet connection.", true);
+    }
+  } catch (e) {
+    showToast("Download error: " + e.message, true);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
   }
 }
 
@@ -866,9 +914,24 @@ async function manageGameGoldberg(appid, name) {
         fetchQueue();
       } else {
         const err = await revRes.json();
-        showToast(err.detail || "Revert failed", true);
+        alert(`Revert Failed:\n\n${err.detail || "Revert failed"}`);
       }
     } else {
+      if (!data.emulator_ready) {
+        const wantDownload = confirm(
+          `'${name}' is compatible with Goldberg emulator, but the emulator DLLs are not downloaded yet.\n\nWould you like VaporFetch to download them from the official build repository now?`
+        );
+        if (!wantDownload) return;
+        showToast("Downloading Goldberg binaries...");
+        const dlRes = await fetch("/api/goldberg/download", { method: "POST" });
+        if (!dlRes.ok) {
+          const dlErr = await dlRes.json();
+          alert(`Download Failed:\n\n${dlErr.detail || "Could not download emulator DLLs"}`);
+          return;
+        }
+        showToast("Goldberg binaries downloaded! Applying offline patch...");
+      }
+
       const confirmPatch = confirm(
         `'${name}' uses standard Steam API DLLs and is compatible!\n\nWould you like to apply the Goldberg offline play wrapper?\n\n• Replaces steam_api(64).dll with emulator\n• Generates steam_appid.txt (${appid})\n• Backs up original DLLs as .orig`
       );
@@ -879,7 +942,7 @@ async function manageGameGoldberg(appid, name) {
         fetchQueue();
       } else {
         const err = await patchRes.json();
-        showToast(err.detail || "Patch failed", true);
+        alert(`Offline Wrapper Failed:\n\n${err.detail || "Patch failed"}`);
       }
     }
   } catch (e) {

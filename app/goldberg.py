@@ -14,54 +14,105 @@ GOLDBERG_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Release URL fallback list for Goldberg Steam Emulator
 GOLDBERG_RELEASE_URLS = [
-    "https://github.com/Detanup01/gbe_fork/releases/latest/download/goldberg_emulator.zip",
-    "https://gitlab.com/Mr_Goldberg/goldberg_emulator/-/jobs/artifacts/master/raw/goldberg_emulator.zip?job=build",
+    "https://gitlab.com/Mr_Goldberg/goldberg_emulator/-/jobs/4247811310/artifacts/download",
 ]
 
 class GoldbergManager:
     def __init__(self):
         self.dir = GOLDBERG_ASSETS_DIR
+        self.bundled_candidates = [
+            BASE_DIR / "app" / "assets" / "goldberg",
+            BASE_DIR / "assets" / "goldberg",
+            Path("/app/app/assets/goldberg"),
+            Path("/app/assets/goldberg"),
+        ]
 
     @property
     def dll32_path(self) -> Path:
-        return self.dir / "steam_api.dll"
+        target = self.dir / "steam_api.dll"
+        if target.exists():
+            return target
+        for candidate in self.bundled_candidates:
+            c = candidate / "steam_api.dll"
+            if c.exists():
+                return c
+        return target
 
     @property
     def dll64_path(self) -> Path:
-        return self.dir / "steam_api64.dll"
+        target = self.dir / "steam_api64.dll"
+        if target.exists():
+            return target
+        for candidate in self.bundled_candidates:
+            c = candidate / "steam_api64.dll"
+            if c.exists():
+                return c
+        return target
 
     def is_available(self) -> bool:
         """Returns True if the required Goldberg emulator DLLs are ready on disk."""
         return self.dll32_path.exists() and self.dll64_path.exists()
 
     async def ensure_binaries(self) -> bool:
-        """Ensures Goldberg DLLs exist; downloads from mirror if missing."""
+        """Ensures Goldberg DLLs exist; checks bundled paths and downloads from mirror if missing."""
+        # 1. If already available in bundled candidate or self.dir, sync to self.dir for persistence
         if self.is_available():
-            return True
-
-        # Check if they exist in pre-bundled container asset folder /app/assets/goldberg
-        bundled = BASE_DIR / "assets" / "goldberg"
-        if (bundled / "steam_api.dll").exists() and (bundled / "steam_api64.dll").exists():
-            shutil.copy2(bundled / "steam_api.dll", self.dll32_path)
-            shutil.copy2(bundled / "steam_api64.dll", self.dll64_path)
-            return True
-
-        # Attempt download from mirrors using standard library urllib
-        for url in GOLDBERG_RELEASE_URLS:
             try:
+                if not (self.dir / "steam_api.dll").exists() and self.dll32_path.exists():
+                    shutil.copy2(self.dll32_path, self.dir / "steam_api.dll")
+                if not (self.dir / "steam_api64.dll").exists() and self.dll64_path.exists():
+                    shutil.copy2(self.dll64_path, self.dir / "steam_api64.dll")
+            except Exception as e:
+                print(f"[Goldberg] Warning syncing binaries to data directory: {e}")
+            return True
+
+        # 2. Check bundled candidates explicitly
+        for candidate in self.bundled_candidates:
+            c32 = candidate / "steam_api.dll"
+            c64 = candidate / "steam_api64.dll"
+            if c32.exists() and c64.exists():
+                try:
+                    shutil.copy2(c32, self.dir / "steam_api.dll")
+                    shutil.copy2(c64, self.dir / "steam_api64.dll")
+                    return True
+                except Exception as e:
+                    print(f"[Goldberg] Error copying bundled binaries: {e}")
+
+        # 3. Attempt dynamic URL scrape from GitLab pages
+        urls_to_try = list(GOLDBERG_RELEASE_URLS)
+        try:
+            req = urllib.request.Request("https://mr_goldberg.gitlab.io/goldberg_emulator/", headers={"User-Agent": "VaporFetch/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                page_text = resp.read().decode("utf-8", errors="ignore")
+                import re
+                match = re.search(r'href="([^"]*artifacts/download)"', page_text)
+                if match:
+                    dyn_url = match.group(1)
+                    if dyn_url not in urls_to_try:
+                        urls_to_try.insert(0, dyn_url)
+        except Exception as pe:
+            print(f"[Goldberg] GitLab Pages scrape warning: {pe}")
+
+        # 4. Attempt download from mirrors
+        for url in urls_to_try:
+            try:
+                print(f"[Goldberg] Downloading emulator binaries from {url}...")
                 req = urllib.request.Request(url, headers={"User-Agent": "VaporFetch/1.0"})
-                with urllib.request.urlopen(req, timeout=30) as resp:
+                with urllib.request.urlopen(req, timeout=45) as resp:
                     content = resp.read()
                     with zipfile.ZipFile(io.BytesIO(content)) as zf:
                         for member in zf.namelist():
                             norm = member.lower().replace("\\", "/")
+                            # Match steam_api.dll (exclude steam_api64.dll)
                             if norm.endswith("steam_api.dll") and not norm.endswith("steam_api64.dll"):
-                                with zf.open(member) as src, open(self.dll32_path, "wb") as dst:
+                                with zf.open(member) as src, open(self.dir / "steam_api.dll", "wb") as dst:
                                     shutil.copyfileobj(src, dst)
+                            # Match steam_api64.dll
                             elif norm.endswith("steam_api64.dll"):
-                                with zf.open(member) as src, open(self.dll64_path, "wb") as dst:
+                                with zf.open(member) as src, open(self.dir / "steam_api64.dll", "wb") as dst:
                                     shutil.copyfileobj(src, dst)
                     if self.is_available():
+                        print(f"[Goldberg] Emulator binaries successfully installed into {self.dir}")
                         return True
             except Exception as e:
                 print(f"[Goldberg] Mirror download failed ({url}): {e}")
@@ -102,7 +153,10 @@ class GoldbergManager:
         Backs up original DLLs to .orig and writes steam_appid.txt.
         """
         if not self.is_available():
-            raise FileNotFoundError("Goldberg emulator DLLs not found. Please ensure they are downloaded.")
+            raise FileNotFoundError(
+                "Goldberg emulator DLLs (steam_api.dll / steam_api64.dll) are missing. "
+                "Please place them into your mounted NAS data folder under 'goldberg/' or ensure internet connectivity."
+            )
 
         if not game_path.exists():
             raise FileNotFoundError(f"Game directory not found: {game_path}")

@@ -1,8 +1,104 @@
 # VaporFetch 🎮
 
+[![Build & Publish Docker Image](https://github.com/theretrogeekyt-dev/VaporFetch/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/theretrogeekyt-dev/VaporFetch/actions/workflows/docker-publish.yml)
+[![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker)](https://github.com/theretrogeekyt-dev/VaporFetch/pkgs/container/vaporfetch)
+
 A lightweight, self-hosted web application packaged in a single Docker container to batch-download Steam games directly to a mounted Network Attached Storage (NAS) directory.
 
 Featuring modern **Steam Guard QR code authentication** (scan from your phone without entering credentials into web forms), a clean multi-select game library interface, and a sequential batch download queue manager powered by **SteamCMD**.
+
+---
+
+## 🚀 Quick Setup Without Source Code (Recommended)
+
+You do **NOT** need to clone the repository or build from source. A pre-built, automated Docker image is compiled and published to the GitHub Container Registry (`ghcr.io`) upon every push.
+
+### Option 1: Using `docker-compose.yml` (Fastest)
+
+1. Create a folder and download the standalone `docker-compose.yml`:
+   ```bash
+   mkdir -p vaporfetch && cd vaporfetch
+   curl -fsSL https://raw.githubusercontent.com/theretrogeekyt-dev/VaporFetch/main/docker-compose.yml -o docker-compose.yml
+   ```
+
+2. Open `docker-compose.yml` in your editor and adjust your storage paths:
+   ```yaml
+   services:
+     vaporfetch:
+       image: ghcr.io/theretrogeekyt-dev/vaporfetch:latest
+       container_name: vaporfetch
+       restart: unless-stopped
+       ports:
+         - "8080:8080"
+       environment:
+         - PUID=1000                  # Your NAS user ID (id -u)
+         - PGID=1000                  # Your NAS group ID (id -g)
+         - UMASK=002                  # Ensures group-writable permissions
+         - STEAM_API_KEY=             # Optional: https://steamcommunity.com/dev/apikey
+         - FORCE_PLATFORM=windows     # Download Windows game depots on Linux NAS
+       volumes:
+         - ./data:/app/data           # Stores settings, sessions & Steam cache
+         - /mnt/storage/games:/downloads  # Mount path to your NAS share
+   ```
+
+3. Launch the container:
+   ```bash
+   docker compose up -d
+   ```
+
+4. Open **`http://<nas-ip>:8080`** in your web browser.
+
+---
+
+### Option 2: Single `docker run` Command (Zero Files Needed)
+
+You can spin up VaporFetch with a single CLI command without creating any files:
+
+```bash
+docker run -d \
+  --name vaporfetch \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -e PUID=1000 \
+  -e PGID=1000 \
+  -e UMASK=002 \
+  -e FORCE_PLATFORM=windows \
+  -v /path/to/nas/data:/app/data \
+  -v /path/to/nas/downloads:/downloads \
+  ghcr.io/theretrogeekyt-dev/vaporfetch:latest
+```
+
+---
+
+### Option 3: Synology / Unraid / TrueNAS / Portainer Web UI
+
+- **Container Image**: `ghcr.io/theretrogeekyt-dev/vaporfetch:latest`
+- **Port Mapping**: `8080` (host) &rarr; `8080` (container)
+- **Volumes**:
+  - `/downloads` &rarr; Host path to your NAS game library folder
+  - `/app/data` &rarr; Host path to app data storage
+- **Environment Variables**:
+  - `PUID`: `1000` (or `99` on Unraid)
+  - `PGID`: `1000` (or `100` on Unraid)
+  - `UMASK`: `002`
+
+---
+
+## 🔄 Automated Updates via GitHub Actions
+
+VaporFetch includes an automated GitHub Actions CI/CD pipeline (`.github/workflows/docker-publish.yml`). 
+Whenever new commits are pushed to the `main` branch, the workflow:
+1. Builds a fresh, verified Docker image with Debian bookworm, SteamCMD, and Python 3.
+2. Publishes the image directly to **GitHub Container Registry** (`ghcr.io/theretrogeekyt-dev/vaporfetch:latest`).
+
+### How to Update Your Container
+
+To update to the latest version at any time:
+```bash
+docker compose pull
+docker compose up -d
+```
+*Or use [Watchtower](https://containrrr.dev/watchtower/) for 100% automated updates.*
 
 ---
 
@@ -22,6 +118,9 @@ Featuring modern **Steam Guard QR code authentication** (scan from your phone wi
 
 ```
 VaporFetch/
+├── .github/
+│   └── workflows/
+│       └── docker-publish.yml  # GitHub Actions CI/CD to build & push to ghcr.io on push
 ├── Dockerfile                  # Single multi-arch container with SteamCMD & Python
 ├── docker-compose.yml          # Pre-configured compose file with NAS volume mounts
 ├── entrypoint.sh               # Handles dynamic PUID/PGID and NAS file permissions
@@ -39,53 +138,6 @@ VaporFetch/
         ├── style.css           # Sleek dark gaming theme with animations
         └── app.js              # Client controller for QR auth, library & queue
 ```
-
----
-
-## 🚀 Quick Start with Docker Compose
-
-### 1. Clone or Download Repository
-```bash
-git clone https://github.com/theretrogeekyt-dev/VaporFetch.git
-cd VaporFetch
-```
-
-### 2. Check Host PUID & PGID
-Find your NAS or host user's UID and GID so the container writes files with matching permissions:
-```bash
-id $USER
-# Example output: uid=1000(joshua) gid=1000(joshua)
-```
-
-### 3. Configure `docker-compose.yml`
-Edit `docker-compose.yml` and point `/downloads` to your host storage or NAS share:
-
-```yaml
-services:
-  vaporfetch:
-    build: .
-    image: vaporfetch:latest
-    container_name: vaporfetch
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    environment:
-      - PUID=1000                  # Match host user ID
-      - PGID=1000                  # Match host group ID
-      - UMASK=002                  # Group-writable permissions
-      - STEAM_API_KEY=             # Optional: https://steamcommunity.com/dev/apikey
-      - FORCE_PLATFORM=windows     # Download Windows depots on Linux NAS
-    volumes:
-      - ./data:/app/data           # Persistent app state & SteamCMD login cache
-      - /mnt/storage/games:/downloads  # Your NAS game storage mount path
-```
-
-### 4. Start Container
-```bash
-docker compose up -d
-```
-
-Open your browser at **`http://<nas-ip>:8080`**.
 
 ---
 
@@ -134,4 +186,3 @@ When running on systems like **Synology DSM**, **Unraid**, or **TrueNAS SCALE**:
 | `GET` | `/api/queue/stream` | Server-Sent Events (SSE) live progress & log stream |
 | `GET` | `/api/system/status` | Returns NAS storage disk usage and container info |
 | `POST` | `/api/settings` | Updates container settings |
-

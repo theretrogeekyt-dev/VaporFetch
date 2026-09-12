@@ -1,7 +1,9 @@
 services:
   vaporfetch:
-    build: .
-    image: vaporfetch:latest
+    # Use pre-built image from GitHub Container Registry (no source code required)
+    image: ghcr.io/theretrogeekyt-dev/vaporfetch:latest
+    # Or build locally if developing:
+    # build: .
     container_name: vaporfetch
     restart: unless-stopped
     ports:
@@ -21,4 +23,3 @@ services:
       # Target download folder on your NAS / Host storage
       # Replace './downloads' with your actual NAS share path (e.g., /mnt/user/games or /volume1/downloads)
       - ./downloads:/downloads
-

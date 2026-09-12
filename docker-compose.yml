@@ -23,3 +23,5 @@ services:
       # Target download folder on your NAS / Host storage
       # Replace './downloads' with your actual NAS share path (e.g., /mnt/user/games or /volume1/downloads)
       - ./downloads:/downloads
+      # Optional: Mount Docker socket to enable 1-click in-app container updates from the Web UI
+      # - /var/run/docker.sock:/var/run/docker.sock

@@ -47,6 +47,11 @@
         </div>
       </div>
 
+      <!-- Update Available Indicator Button -->
+      <button id="navUpdateBtn" class="icon-btn pulse-glow" onclick="openUpdateModal()" title="VaporFetch Update Available" style="display: none; color: #38bdf8;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      </button>
+
       <!-- Settings Button -->
       <button class="icon-btn" onclick="openSettingsModal()" title="Configuration & Settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -74,6 +79,21 @@
 
   <!-- Main Container -->
   <main class="main-content">
+
+    <!-- Update Available Alert Banner -->
+    <div id="updateBanner" class="update-banner" style="display: none;">
+      <div class="update-banner-left">
+        <span class="update-banner-icon">🚀</span>
+        <div>
+          <strong>Update Available:</strong>
+          <span id="updateBannerText">A newer version of VaporFetch is available!</span>
+        </div>
+      </div>
+      <div class="update-banner-actions">
+        <button id="btnBannerUpdate" class="btn btn-sm btn-primary" onclick="openUpdateModal()">Update Now</button>
+        <button class="btn btn-sm btn-outline" onclick="dismissUpdateBanner()" title="Dismiss until next session">&times;</button>
+      </div>
+    </div>
 
     <!-- One-Time Setup Incomplete Alert Banner -->
     <div id="setupBanner" class="setup-banner" style="display: none;">
@@ -425,6 +445,87 @@
           <button type="submit" class="btn btn-primary">Save Settings</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Container Update Modal -->
+  <div id="updateModal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card" style="max-width: 520px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.3rem;">🚀</span>
+          <h3>VaporFetch Update Available</h3>
+        </div>
+        <button class="close-btn" onclick="closeUpdateModal()">&times;</button>
+      </div>
+      
+      <div class="modal-body" style="padding: 16px 20px;">
+        <div class="update-version-card">
+          <div class="version-badge-row">
+            <div>
+              <span class="version-label">Current:</span>
+              <code id="updCurrentVer">v1.0.0 (dev)</code>
+            </div>
+            <span style="color: var(--text-secondary);">&rarr;</span>
+            <div>
+              <span class="version-label">Latest:</span>
+              <code id="updLatestVer" style="color: #38bdf8; font-weight: 600;">latest</code>
+            </div>
+          </div>
+          
+          <div class="update-commit-box">
+            <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 4px;" id="updCommitMsg">Loading release info...</div>
+            <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-secondary);">
+              <span id="updCommitDate">--</span>
+              <a id="updCommitLink" href="https://github.com/theretrogeekyt-dev/VaporFetch/commits/main" target="_blank" rel="noopener noreferrer" style="color: #38bdf8; text-decoration: underline;">View on GitHub &nearr;</a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mode A: Docker Socket Available (1-Click Update) -->
+        <div id="updAutoSection" style="display: none; margin-top: 16px;">
+          <div class="alert-info" style="margin-bottom: 14px;">
+            <span>⚡ <strong>1-Click Update Ready:</strong> Docker socket is mounted. VaporFetch will pull the newest image from <code>ghcr.io</code> and recreate the container automatically without touching your NAS Container Manager.</span>
+          </div>
+          <button id="btnPerformAutoUpdate" class="btn btn-primary btn-block" onclick="triggerContainerUpdate()">
+            🚀 Recreate & Update Container Now
+          </button>
+        </div>
+
+        <!-- Mode B: Docker Socket Missing (Instructions & Copy Command) -->
+        <div id="updManualSection" style="display: none; margin-top: 16px;">
+          <div class="alert-warning" style="margin-bottom: 12px; font-size: 0.82rem;">
+            <span>ℹ️ <strong>1-Click Update Disabled:</strong> Docker socket (<code>/var/run/docker.sock</code>) is not mounted into this container.</span>
+          </div>
+          
+          <label style="font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; display: block;">Terminal / SSH Command (Run on NAS):</label>
+          <div class="copy-cmd-box">
+            <code id="updDockerCmd">docker compose pull && docker compose up -d</code>
+            <button type="button" class="btn btn-xs btn-outline" onclick="copyUpdateCommand()">Copy</button>
+          </div>
+
+          <div style="margin-top: 12px; font-size: 0.78rem; color: var(--text-secondary);">
+            <strong>Want 1-click updates in the web UI?</strong>
+            Add <code>- /var/run/docker.sock:/var/run/docker.sock</code> under <code>volumes:</code> in your compose file or Docker run command.
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-actions" style="padding: 12px 20px; background: var(--bg-surface-2);">
+        <button type="button" class="btn btn-secondary" onclick="closeUpdateModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Updating Fullscreen Overlay -->
+  <div id="updatingOverlay" class="updating-overlay" style="display: none;">
+    <div class="updating-card">
+      <div class="spinner-large"></div>
+      <h3>Updating VaporFetch...</h3>
+      <p id="updatingStatusText" style="color: var(--text-secondary); margin-top: 8px;">Pulling latest image from GitHub Container Registry and restarting container.</p>
+      <div class="reconnect-timer">
+        <span>Reconnecting in <strong id="reconnectCountdown" style="color: #38bdf8;">25</strong>s...</span>
+      </div>
     </div>
   </div>
 

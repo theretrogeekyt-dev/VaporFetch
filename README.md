@@ -109,6 +109,7 @@ docker compose up -d
 - ⚡ **Sequential Batch Downloader**: Built-in queue manager powered by SteamCMD that downloads games sequentially into `/downloads/<GameName>`.
 - 🧹 **Clean Directory Restructuring**: Automatically removes nested `steamapps/common` hierarchies post-download, flattens game files to the root game directory, and renames `_CommonRedist` to `Redistrutables`.
 - 🕹️ **DRM-Free Offline Wrapper (Goldberg Emulator)**: Optional integration of Goldberg Steam Emulator for DRM-free offline play of compatible games directly from your backup NAS share. Safely backs up authentic Steam DLLs as `.orig`, writes `steam_appid.txt`, and supports both auto-patching and per-game Apply/Revert controls.
+- 🚀 **Startup Update Notifications & 1-Click Self-Update**: Automatically notifies you on startup when a new container image/release is published. Supports 1-click in-app container recreation via Docker socket (`/var/run/docker.sock`) so you never have to touch your NAS Container Manager GUI.
 - 📊 **Real-Time Progress & Telemetry**: Live progress bars, downloaded/total size metrics, download speed (MB/s), ETA calculations, and a collapsible live SteamCMD terminal stream powered by Server-Sent Events (SSE).
 - 🗄️ **True NAS Compatibility**: Native support for `PUID`, `PGID`, and `UMASK` ensures that all downloaded game files match your host NAS user permissions (e.g. Unraid, Synology, TrueNAS, QNAP).
 - 🪟 **Cross-Platform Depot Support**: Configurable to download Windows game depots (`+@sSteamCmdForcePlatformType windows`) directly onto a Linux NAS for Proton/Steam Deck/PC network sharing.
@@ -135,6 +136,7 @@ VaporFetch/
     ├── steam_api.py            # Steam Web API client (GetOwnedGames, avatars, caching)
     ├── queue_manager.py        # Sequential download queue, SteamCMD runner, & post-processing
     ├── goldberg.py             # Goldberg Steam Emulator manager, patcher & restoration
+    ├── updater.py              # Startup update checker and 1-click Docker container updater
     ├── config.py               # Paths, settings, and persistent storage
     └── static/
         ├── index.html          # Clean, responsive single-page dashboard
@@ -203,6 +205,20 @@ When running on systems like **Synology DSM**, **Unraid**, or **TrueNAS SCALE**:
 
 ---
 
+## 🚀 In-App Container Updates & Startup Notifications
+
+VaporFetch automatically queries the upstream repository on page startup to check if a new commit or release has been published.
+
+### How It Works
+1. **Startup Alert Banner**: If an update is detected, a blue notification banner appears at the top of your dashboard displaying the new commit message, short SHA, and an **"Update Now"** button.
+2. **1-Click Self-Update (Zero NAS GUI Required)**:
+   - If you mount the host Docker socket (`-v /var/run/docker.sock:/var/run/docker.sock`), clicking **"Update Now"** instructs VaporFetch to pull the newest image from `ghcr.io` and recreate itself in-place using Watchtower automation.
+   - The web interface displays a sleek reconnect countdown screen while the container restarts, then automatically refreshes the page once back online!
+3. **No-Socket Fallback**:
+   - If the Docker socket is not mounted, the update modal displays the release changelog and provides a 1-click copyable terminal command (`docker compose pull && docker compose up -d`) so you can update instantly via SSH without navigating Synology Container Manager.
+
+---
+
 ## 📡 REST & Streaming API Reference
 
 | Method | Endpoint | Description |
@@ -222,3 +238,7 @@ When running on systems like **Synology DSM**, **Unraid**, or **TrueNAS SCALE**:
 | `GET` | `/api/games/{appid}/goldberg` | Inspects compatibility and patch status of a downloaded game |
 | `POST` | `/api/games/{appid}/goldberg/apply` | Applies Goldberg emulator, backs up `.orig`, creates `steam_appid.txt` |
 | `POST` | `/api/games/{appid}/goldberg/revert` | Restores original Steam DLLs and removes emulator configuration |
+| `GET` | `/api/system/version` | Returns container version, commit SHA, and Docker socket status |
+| `GET` | `/api/system/update/check` | Checks upstream GitHub repository for new commits/releases |
+| `POST` | `/api/system/update/apply` | Triggers container self-update via Docker socket |
+

@@ -62,6 +62,12 @@ WORKDIR /app
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Build arguments for version and commit tracking
+ARG APP_COMMIT_SHA=dev
+ARG APP_VERSION=1.0.0
+ENV APP_COMMIT_SHA=${APP_COMMIT_SHA}
+ENV APP_VERSION=${APP_VERSION}
+
 # Copy application source code and entrypoint
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh

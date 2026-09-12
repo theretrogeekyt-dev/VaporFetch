@@ -393,3 +393,31 @@ async def trigger_goldberg_download():
         )
     return {"success": True, "message": "Goldberg binaries downloaded and ready."}
 
+
+# ---------------- System Version & Container Updater Endpoints ---------------- #
+
+from app.updater import container_updater
+from app.config import APP_VERSION, APP_COMMIT_SHA
+
+@app.get("/api/system/version")
+async def get_system_version():
+    return {
+        "version": APP_VERSION,
+        "commit": APP_COMMIT_SHA,
+        "short_commit": APP_COMMIT_SHA[:7] if APP_COMMIT_SHA != "dev" else "dev",
+        "is_dev": APP_COMMIT_SHA.lower() in ("dev", "", "unknown"),
+        "docker_socket_available": container_updater.is_docker_socket_available(),
+    }
+
+@app.get("/api/system/update/check")
+async def check_container_update(force: bool = False):
+    return await container_updater.check_for_updates(force=force)
+
+@app.post("/api/system/update/apply")
+async def apply_container_update():
+    try:
+        return await container_updater.apply_update()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+

@@ -13,6 +13,7 @@ document.addEventListener("DOMContentLoaded", () => {
   checkAuthSession();
   fetchSystemStatus();
   initSSE();
+  checkForUpdatesOnStartup();
   // Poll system status periodically (every 30 seconds)
   setInterval(fetchSystemStatus, 30000);
 });
@@ -949,4 +950,155 @@ async function manageGameGoldberg(appid, name) {
     showToast("Error managing offline wrapper: " + e.message, true);
   }
 }
+
+// ---------------- Container Update Notification & In-App Updater ---------------- //
+
+let currentUpdateInfo = null;
+
+async function checkForUpdatesOnStartup(force = false) {
+  try {
+    const res = await fetch(`/api/system/update/check${force ? '?force=true' : ''}`);
+    if (!res.ok) return;
+    currentUpdateInfo = await res.json();
+
+    const banner = document.getElementById("updateBanner");
+    const navBtn = document.getElementById("navUpdateBtn");
+    const bannerText = document.getElementById("updateBannerText");
+
+    if (currentUpdateInfo && currentUpdateInfo.update_available) {
+      if (navBtn) navBtn.style.display = "flex";
+      
+      const dismissedCommit = sessionStorage.getItem("vaporfetch_update_dismissed");
+      if (dismissedCommit !== currentUpdateInfo.latest_commit && banner && bannerText) {
+        bannerText.innerHTML = `VaporFetch <strong>${currentUpdateInfo.latest_short_sha}</strong> is available: <em>${escapeHtml(currentUpdateInfo.commit_message)}</em>`;
+        banner.style.display = "flex";
+      }
+    } else {
+      if (banner) banner.style.display = "none";
+      if (navBtn) navBtn.style.display = "none";
+    }
+  } catch (e) {
+    console.warn("Could not check for updates:", e);
+  }
+}
+
+function dismissUpdateBanner() {
+  const banner = document.getElementById("updateBanner");
+  if (banner) banner.style.display = "none";
+  if (currentUpdateInfo && currentUpdateInfo.latest_commit) {
+    sessionStorage.setItem("vaporfetch_update_dismissed", currentUpdateInfo.latest_commit);
+  }
+}
+
+function openUpdateModal() {
+  const modal = document.getElementById("updateModal");
+  if (!modal) return;
+
+  const currentVerEl = document.getElementById("updCurrentVer");
+  const latestVerEl = document.getElementById("updLatestVer");
+  const commitMsgEl = document.getElementById("updCommitMsg");
+  const commitDateEl = document.getElementById("updCommitDate");
+  const commitLinkEl = document.getElementById("updCommitLink");
+  const autoSection = document.getElementById("updAutoSection");
+  const manualSection = document.getElementById("updManualSection");
+
+  if (currentUpdateInfo) {
+    if (currentVerEl) {
+      currentVerEl.textContent = `${currentUpdateInfo.current_version} (${currentUpdateInfo.current_short_sha})`;
+    }
+    if (latestVerEl) {
+      latestVerEl.textContent = `${currentUpdateInfo.latest_short_sha || 'latest'}`;
+    }
+    if (commitMsgEl) {
+      commitMsgEl.textContent = currentUpdateInfo.commit_message || "Latest release updates";
+    }
+    if (commitDateEl) {
+      commitDateEl.textContent = currentUpdateInfo.commit_date ? new Date(currentUpdateInfo.commit_date).toLocaleString() : "";
+    }
+    if (commitLinkEl) {
+      commitLinkEl.href = currentUpdateInfo.commit_url || "https://github.com/theretrogeekyt-dev/VaporFetch/commits/main";
+    }
+
+    if (currentUpdateInfo.can_auto_update) {
+      if (autoSection) autoSection.style.display = "block";
+      if (manualSection) manualSection.style.display = "none";
+    } else {
+      if (autoSection) autoSection.style.display = "none";
+      if (manualSection) manualSection.style.display = "block";
+    }
+  }
+
+  modal.style.display = "flex";
+}
+
+function closeUpdateModal() {
+  const modal = document.getElementById("updateModal");
+  if (modal) modal.style.display = "none";
+}
+
+function copyUpdateCommand() {
+  const cmd = document.getElementById("updDockerCmd");
+  if (!cmd) return;
+  navigator.clipboard.writeText(cmd.textContent.trim()).then(() => {
+    showToast("Update command copied to clipboard!");
+  }).catch(() => {
+    showToast("Failed to copy command", true);
+  });
+}
+
+async function triggerContainerUpdate() {
+  const confirmed = confirm(
+    "VaporFetch will now pull the latest image and recreate the container.\n\n" +
+    "• The web UI will temporarily disconnect while restarting.\n" +
+    "• All downloads, sessions, and configurations in /app/data are preserved.\n\n" +
+    "Do you want to proceed with the update?"
+  );
+  if (!confirmed) return;
+
+  closeUpdateModal();
+
+  const overlay = document.getElementById("updatingOverlay");
+  const countdownEl = document.getElementById("reconnectCountdown");
+  const statusText = document.getElementById("updatingStatusText");
+  if (overlay) overlay.style.display = "flex";
+
+  try {
+    const res = await fetch("/api/system/update/apply", { method: "POST" });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Failed to trigger update");
+    }
+  } catch (e) {
+    console.warn("Update trigger sent or container terminated early:", e);
+  }
+
+  // Start reconnect countdown and polling
+  let secondsRemaining = 25;
+  if (countdownEl) countdownEl.textContent = secondsRemaining;
+
+  const timer = setInterval(() => {
+    secondsRemaining--;
+    if (countdownEl) countdownEl.textContent = Math.max(0, secondsRemaining);
+  }, 1000);
+
+  // Poll /api/system/version after 8 seconds
+  setTimeout(() => {
+    const poller = setInterval(async () => {
+      try {
+        const ping = await fetch("/api/system/version", { cache: "no-store" });
+        if (ping.ok) {
+          clearInterval(poller);
+          clearInterval(timer);
+          if (statusText) statusText.textContent = "Container restarted successfully! Reloading web interface...";
+          setTimeout(() => {
+            window.location.reload();
+          }, 1500);
+        }
+      } catch (err) {
+        // Expected while container is restarting
+      }
+    }, 2000);
+  }, 8000);
+}
+
 

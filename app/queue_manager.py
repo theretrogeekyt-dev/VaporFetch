@@ -30,12 +30,13 @@ def sanitize_filename(name: str) -> str:
     return sanitized or "SteamGame"
 
 
-def post_process_game_directory(install_path: Path, log_tail: Optional[List[str]] = None):
+def post_process_game_directory(install_path: Path, appid: int = 0, log_tail: Optional[List[str]] = None):
     """
     Cleans up post-download game directory:
     1. Flattens SteamCMD's nested steamapps/common/<Game> structure directly into install_path.
     2. Moves any appmanifest_*.acf into install_path and completely removes the steamapps folder.
     3. Renames any CommonRedist folder (_CommonRedist, CommonRedist, etc.) to 'Redistrutables'.
+    4. Optionally applies Goldberg emulator for DRM-free offline play if enabled in Settings.
     """
     def log(msg: str):
         if log_tail is not None:
@@ -101,6 +102,19 @@ def post_process_game_directory(install_path: Path, log_tail: Optional[List[str]
                         if dest_dir.exists():
                             shutil.rmtree(dest_dir, ignore_errors=True)
                         src_dir.rename(dest_dir)
+
+        # Step 3: Check if Goldberg offline emulator is enabled in settings
+        settings = load_settings()
+        if settings.get("enable_goldberg", False) and appid > 0:
+            try:
+                from app.goldberg import goldberg_manager
+                status = goldberg_manager.check_status(install_path)
+                if status.get("compatible"):
+                    account_name = settings.get("steamcmd_username") or "Player"
+                    res = goldberg_manager.apply(install_path, appid=appid, account_name=account_name)
+                    log(f"Applied Goldberg offline wrapper ({res['patched_count']} DLLs patched). Original saved to .orig.")
+            except Exception as ge:
+                log(f"Could not apply Goldberg wrapper: {ge}")
 
     except Exception as e:
         log(f"Warning during directory cleanup: {e}")
@@ -389,7 +403,7 @@ class DownloadQueueManager:
 
             if returncode == 0 and not item.error:
                 item.step = "Cleaning structure"
-                post_process_game_directory(install_path, item.log_tail)
+                post_process_game_directory(install_path, appid=item.appid, log_tail=item.log_tail)
                 item.status = "completed"
                 item.progress = 100.0
                 item.step = "Completed"

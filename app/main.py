@@ -46,6 +46,7 @@ class SettingsUpdateRequest(BaseModel):
     steam_api_key: Optional[str] = None
     force_platform: Optional[str] = None
     validate_downloads: Optional[bool] = None
+    enable_goldberg: Optional[bool] = None
     steamcmd_username: Optional[str] = None
     steamcmd_password: Optional[str] = None
     custom_steamcmd_args: Optional[str] = None
@@ -300,6 +301,8 @@ async def update_settings(req: SettingsUpdateRequest):
         updates["force_platform"] = req.force_platform
     if req.validate_downloads is not None:
         updates["validate_downloads"] = req.validate_downloads
+    if req.enable_goldberg is not None:
+        updates["enable_goldberg"] = req.enable_goldberg
     if req.steamcmd_username is not None:
         updates["steamcmd_username"] = req.steamcmd_username.strip()
     if req.steamcmd_password is not None and req.steamcmd_password != "******":
@@ -312,4 +315,55 @@ async def update_settings(req: SettingsUpdateRequest):
     if masked.get("steamcmd_password"):
         masked["steamcmd_password"] = "******"
     return masked
+
+
+# ---------------- Goldberg Offline Wrapper Endpoints ---------------- #
+
+from app.goldberg import goldberg_manager
+
+def _find_game_dir(appid: int) -> Optional[Path]:
+    for item in queue_manager.items:
+        if item.appid == appid and item.install_dir and Path(item.install_dir).exists():
+            return Path(item.install_dir)
+    for child in DOWNLOAD_DIR.iterdir():
+        if child.is_dir() and (child / f"appmanifest_{appid}.acf").exists():
+            return child
+    return None
+
+@app.get("/api/games/{appid}/goldberg")
+async def get_goldberg_status(appid: int):
+    target_dir = _find_game_dir(appid)
+    if not target_dir or not target_dir.exists():
+        raise HTTPException(status_code=404, detail="Downloaded game folder not found in /downloads.")
+    status = goldberg_manager.check_status(target_dir)
+    status["install_dir"] = str(target_dir)
+    return status
+
+@app.post("/api/games/{appid}/goldberg/apply")
+async def apply_goldberg(appid: int):
+    target_dir = _find_game_dir(appid)
+    if not target_dir or not target_dir.exists():
+        raise HTTPException(status_code=404, detail="Downloaded game folder not found in /downloads.")
+    
+    settings = load_settings()
+    account_name = settings.get("steamcmd_username") or "Player"
+    await goldberg_manager.ensure_binaries()
+
+    try:
+        res = goldberg_manager.apply(target_dir, appid=appid, account_name=account_name)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/games/{appid}/goldberg/revert")
+async def revert_goldberg(appid: int):
+    target_dir = _find_game_dir(appid)
+    if not target_dir or not target_dir.exists():
+        raise HTTPException(status_code=404, detail="Downloaded game folder not found in /downloads.")
+
+    try:
+        res = goldberg_manager.revert(target_dir)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 

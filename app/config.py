@@ -40,6 +40,7 @@ DEFAULT_SETTINGS = {
     "steam_api_key": os.getenv("STEAM_API_KEY", ""),
     "force_platform": os.getenv("FORCE_PLATFORM", "windows"),  # "windows" or "linux"
     "validate_downloads": True,
+    "enable_goldberg": False,
     "steamcmd_username": "",
     "steamcmd_password": "",
     "custom_steamcmd_args": "",

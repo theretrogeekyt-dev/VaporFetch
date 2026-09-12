@@ -104,9 +104,11 @@ docker compose up -d
 
 ## 🌟 Key Features
 
-- 📱 **Steam Guard QR Code Login**: Users scan an animated QR code displayed on the Web UI using their Steam Mobile app. No manual password or credential entry in web forms.
+- 📱 **Steam Guard QR Code Login & One-Time Setup**: Scan an animated QR code displayed on the Web UI using your Steam Mobile app. Once approved, you are prompted for your password once to authorize SteamCMD downloads—persisting credentials and auto-refreshing access tokens so you never have to sign in repeatedly.
 - 📚 **Game Library & Multi-Selection**: Browse your entire Steam library with official banner artwork, playtime stats, search filtering, and multi-select checkboxes to queue batches of games at once.
 - ⚡ **Sequential Batch Downloader**: Built-in queue manager powered by SteamCMD that downloads games sequentially into `/downloads/<GameName>`.
+- 🧹 **Clean Directory Restructuring**: Automatically removes nested `steamapps/common` hierarchies post-download, flattens game files to the root game directory, and renames `_CommonRedist` to `Redistrutables`.
+- 🕹️ **DRM-Free Offline Wrapper (Goldberg Emulator)**: Optional integration of Goldberg Steam Emulator for DRM-free offline play of compatible games directly from your backup NAS share. Safely backs up authentic Steam DLLs as `.orig`, writes `steam_appid.txt`, and supports both auto-patching and per-game Apply/Revert controls.
 - 📊 **Real-Time Progress & Telemetry**: Live progress bars, downloaded/total size metrics, download speed (MB/s), ETA calculations, and a collapsible live SteamCMD terminal stream powered by Server-Sent Events (SSE).
 - 🗄️ **True NAS Compatibility**: Native support for `PUID`, `PGID`, and `UMASK` ensures that all downloaded game files match your host NAS user permissions (e.g. Unraid, Synology, TrueNAS, QNAP).
 - 🪟 **Cross-Platform Depot Support**: Configurable to download Windows game depots (`+@sSteamCmdForcePlatformType windows`) directly onto a Linux NAS for Proton/Steam Deck/PC network sharing.
@@ -121,7 +123,7 @@ VaporFetch/
 ├── .github/
 │   └── workflows/
 │       └── docker-publish.yml  # GitHub Actions CI/CD to build & push to ghcr.io on push
-├── Dockerfile                  # Single multi-arch container with SteamCMD & Python
+├── Dockerfile                  # Single multi-arch container with SteamCMD, Goldberg & Python
 ├── docker-compose.yml          # Pre-configured compose file with NAS volume mounts
 ├── entrypoint.sh               # Handles dynamic PUID/PGID and NAS file permissions
 ├── requirements.txt            # Minimal Python dependencies
@@ -129,36 +131,67 @@ VaporFetch/
 └── app/
     ├── __init__.py             # Package marker
     ├── main.py                 # FastAPI server, REST API, & SSE live stream
-    ├── auth.py                 # Steam Guard QR session authentication
-    ├── steam_api.py            # Steam Web API client (GetOwnedGames, avatars)
-    ├── queue_manager.py        # Sequential download queue & SteamCMD runner
+    ├── auth.py                 # Steam Guard QR session authentication & JWT refresh
+    ├── steam_api.py            # Steam Web API client (GetOwnedGames, avatars, caching)
+    ├── queue_manager.py        # Sequential download queue, SteamCMD runner, & post-processing
+    ├── goldberg.py             # Goldberg Steam Emulator manager, patcher & restoration
     ├── config.py               # Paths, settings, and persistent storage
     └── static/
         ├── index.html          # Clean, responsive single-page dashboard
         ├── style.css           # Sleek dark gaming theme with animations
-        └── app.js              # Client controller for QR auth, library & queue
+        └── app.js              # Client controller for QR auth, library, queue & Goldberg
 ```
 
 ---
 
-## 🔑 How Steam Guard QR Login Works
+## 🔑 How Steam Guard QR Login Works (One-Time Setup)
 
 1. Open the VaporFetch web interface and click **"Steam Guard Login"**.
 2. A unique challenge QR code will be generated on the screen.
 3. Open the **Steam Mobile App** on your smartphone.
 4. Tap the **Steam Guard** icon (shield) and scan the QR code displayed on the screen.
-5. Tap **"Sign In"** to approve the session.
-6. VaporFetch automatically detects the confirmation, authenticates your session, and loads your owned game library!
+5. Tap **"Sign In"** on your phone to approve the session.
+6. VaporFetch automatically detects the confirmation, validates your session, and transitions to **Stage 2: Password Prompt**.
+7. Enter your Steam password once to authorize SteamCMD to download commercial games you own.
+8. Credentials and session tokens are persisted locally in `/app/data/`. VaporFetch automatically refreshes your Web API tokens, so you never need to scan or log in again!
 
 > [!NOTE]
 > **Steam Web API Key**: If your Steam profile's game details are set to "Friends-Only" or "Private", you can add a Steam Web API key in the UI settings or via the `STEAM_API_KEY` environment variable. You can generate a free key at [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey).
 
 ---
 
+## 🧹 Automatic Directory Restructuring
+
+SteamCMD downloads game content into a deep, cumbersome folder hierarchy:
+`.../steamapps/common/<GameFolder>/...` along with an external `appmanifest_<appid>.acf` file.
+
+VaporFetch's built-in post-processing pipeline automatically cleans this up after every completed download:
+1. **Flattens Game Files**: Moves all game files directly into `/downloads/<GameName>/`, eliminating the intermediate `steamapps/common` path.
+2. **Relocates ACF Manifest**: Moves the `appmanifest_<appid>.acf` into the root of `/downloads/<GameName>/` and completely deletes the empty `steamapps` folder.
+3. **Renames Redistributables**: Detects any `_CommonRedist` or `CommonRedist` folder and renames it to `Redistrutables`.
+
+---
+
+## 🕹️ DRM-Free Offline Backup Wrapper (Goldberg Emulator)
+
+For users creating offline game archives for long-term preservation, VaporFetch includes built-in support for the open-source **Goldberg Steam Emulator**.
+
+### How It Works
+- **Compatibility**: Scans for standard Steamworks binaries (`steam_api.dll` for 32-bit and `steam_api64.dll` for 64-bit).
+- **Safety First**: Your authentic Steam binaries are **never deleted**—they are saved alongside the patched file as `steam_api.dll.orig` or `steam_api64.dll.orig`.
+- **Offline Configuration**: Generates `steam_appid.txt` and `steam_settings/force_account_name.txt` so games run DRM-free without needing the Steam client running or an internet connection.
+- **Clean Reversion**: Reverting instantly restores the `.orig` binaries and deletes the generated emulator files.
+
+### Configuration Options
+1. **Automatic Mode**: Turn on **"Auto-apply Goldberg Emulator to downloaded games"** in the Settings modal to patch all compatible games as soon as they finish downloading.
+2. **Per-Game Control**: In the **Completed Downloads** section of the UI, click the **"Offline Wrapper"** button on any game to check compatibility, review current patch status, apply the emulator, or revert back to authentic files.
+
+---
+
 ## 🎮 Commercial Games & SteamCMD
 
 - **Free Dedicated Servers & Tools**: Download immediately with no additional credentials needed (`anonymous` mode).
-- **Commercial Owned Games**: SteamCMD requires an account with game ownership. VaporFetch auto-populates your username from your QR login. You can supply your password in the Settings modal (or container config). Because the SteamCMD login token is persisted in `/app/data/steam_home`, SteamCMD remembers your machine authorization across container restarts.
+- **Commercial Owned Games**: SteamCMD requires an account with game ownership. VaporFetch captures your username from your QR login and your password from the one-time setup step. Because the SteamCMD login token is persisted in `/app/data/steam_home`, SteamCMD remembers your machine authorization across container restarts.
 
 ---
 
@@ -176,7 +209,7 @@ When running on systems like **Synology DSM**, **Unraid**, or **TrueNAS SCALE**:
 |---|---|---|
 | `POST` | `/api/auth/qr/begin` | Generates a new Steam Guard QR auth session |
 | `POST` | `/api/auth/qr/poll` | Polls authentication status until mobile approval |
-| `GET` | `/api/auth/session` | Returns the active user session and profile |
+| `GET` | `/api/auth/session` | Returns the active user session and setup status |
 | `POST` | `/api/auth/logout` | Clears current session |
 | `GET` | `/api/games` | Returns owned games list with banner images |
 | `GET` | `/api/queue` | Returns current download queue and active item |
@@ -185,4 +218,7 @@ When running on systems like **Synology DSM**, **Unraid**, or **TrueNAS SCALE**:
 | `POST` | `/api/queue/{id}/retry` | Retries a failed download |
 | `GET` | `/api/queue/stream` | Server-Sent Events (SSE) live progress & log stream |
 | `GET` | `/api/system/status` | Returns NAS storage disk usage and container info |
-| `POST` | `/api/settings` | Updates container settings |
+| `POST` | `/api/settings` | Updates container settings (including Goldberg toggle) |
+| `GET` | `/api/games/{appid}/goldberg` | Inspects compatibility and patch status of a downloaded game |
+| `POST` | `/api/games/{appid}/goldberg/apply` | Applies Goldberg emulator, backs up `.orig`, creates `steam_appid.txt` |
+| `POST` | `/api/games/{appid}/goldberg/revert` | Restores original Steam DLLs and removes emulator configuration |

@@ -662,6 +662,7 @@ function renderHistoryList(items) {
           </div>
         </div>
         <div style="display:flex; gap: 6px;">
+          ${isCompleted ? `<button class="btn btn-xs btn-outline" onclick="manageGameGoldberg(${item.appid}, '${escapeHtml(item.name)}')" title="Configure Offline Play (Goldberg)">Offline Wrapper</button>` : ''}
           ${!isCompleted ? `<button class="btn btn-xs btn-secondary" onclick="retryQueueItem('${item.id}')">Retry</button>` : ''}
           <button class="btn btn-xs btn-outline" onclick="removeQueueItem('${item.id}')">Dismiss</button>
         </div>
@@ -794,6 +795,7 @@ async function openSettingsModal() {
       document.getElementById("cfgApiKey").value = cfg.steam_api_key || "";
       document.getElementById("cfgPlatform").value = cfg.force_platform || "windows";
       document.getElementById("cfgValidate").checked = cfg.validate_downloads !== false;
+      document.getElementById("cfgGoldberg").checked = cfg.enable_goldberg === true;
       document.getElementById("cfgUsername").value = cfg.steamcmd_username || "";
       document.getElementById("cfgPassword").value = cfg.steamcmd_password || "";
       document.getElementById("cfgCustomArgs").value = cfg.custom_steamcmd_args || "";
@@ -813,6 +815,7 @@ async function saveSettings(event) {
     steam_api_key: document.getElementById("cfgApiKey").value,
     force_platform: document.getElementById("cfgPlatform").value,
     validate_downloads: document.getElementById("cfgValidate").checked,
+    enable_goldberg: document.getElementById("cfgGoldberg").checked,
     steamcmd_username: document.getElementById("cfgUsername").value,
     steamcmd_password: document.getElementById("cfgPassword").value,
     custom_steamcmd_args: document.getElementById("cfgCustomArgs").value,
@@ -836,6 +839,51 @@ async function saveSettings(event) {
     }
   } catch (e) {
     showToast(e.message, true);
+  }
+}
+
+async function manageGameGoldberg(appid, name) {
+  try {
+    const res = await fetch(`/api/games/${appid}/goldberg`);
+    if (!res.ok) {
+      showToast(`Game folder for ${name} not found in /downloads.`, true);
+      return;
+    }
+    const data = await res.json();
+    if (!data.compatible) {
+      showToast(`'${name}' does not use steam_api(64).dll. Goldberg is not required or applicable.`, true);
+      return;
+    }
+
+    if (data.patched) {
+      const confirmRevert = confirm(
+        `'${name}' is currently equipped with Goldberg offline emulator.\n\nDo you want to REVERT back to authentic Steam DLLs?`
+      );
+      if (!confirmRevert) return;
+      const revRes = await fetch(`/api/games/${appid}/goldberg/revert`, { method: "POST" });
+      if (revRes.ok) {
+        showToast(`Reverted '${name}' to authentic Steam binaries!`);
+        fetchQueue();
+      } else {
+        const err = await revRes.json();
+        showToast(err.detail || "Revert failed", true);
+      }
+    } else {
+      const confirmPatch = confirm(
+        `'${name}' uses standard Steam API DLLs and is compatible!\n\nWould you like to apply the Goldberg offline play wrapper?\n\n• Replaces steam_api(64).dll with emulator\n• Generates steam_appid.txt (${appid})\n• Backs up original DLLs as .orig`
+      );
+      if (!confirmPatch) return;
+      const patchRes = await fetch(`/api/games/${appid}/goldberg/apply`, { method: "POST" });
+      if (patchRes.ok) {
+        showToast(`Offline wrapper applied successfully to '${name}'!`);
+        fetchQueue();
+      } else {
+        const err = await patchRes.json();
+        showToast(err.detail || "Patch failed", true);
+      }
+    }
+  } catch (e) {
+    showToast("Error managing offline wrapper: " + e.message, true);
   }
 }
 

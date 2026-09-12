@@ -1,108 +1,136 @@
 # VaporFetch 🎮
 
-[![Docker Image](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
+[![Docker Image](https://img.shields.io/badge/docker-ready-blue.svg)](https://github.com/theretrogeekyt-dev/VaporFetch/pkgs/container/vaporfetch)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/Node.js-20-green.svg)](https://nodejs.org/)
 [![SteamCMD](https://img.shields.io/badge/Engine-SteamCMD-black.svg)](https://developer.valvesoftware.com/wiki/SteamCMD)
 
 A lightweight, containerized Steam game download utility designed to download Steam games and dedicated servers directly to **Network Attached Storage (NAS)** devices (Synology, Unraid, TrueNAS, QNAP, or Linux SMB/NFS mounts).
 
 Built with **SteamCMD** under the hood, **VaporFetch** features a sleek, responsive Web UI with real-time log streaming, progress tracking, dynamic NAS permission management (`PUID`/`PGID`), and interactive Steam Guard 2FA support.
 
----
-
-## ✨ Features
-
-- **🚀 SteamCMD Engine**: Automatic installation of SteamCMD with all 32-bit Debian dependencies (`i386`) pre-configured.
-- **💾 NAS Storage Integration**: Built-in `PUID`/`PGID` permission mapping ensures downloaded files are owned by your NAS user—eliminating `root` permission conflicts on SMB/CIFS and NFS shares.
-- **🖥️ Sleek Web UI**:
-  - **Live Steam Info**: Instant AppID lookup queries the Steam Store API for game title and cover art.
-  - **Quick-Select Presets**: One-click configuration for popular dedicated servers (Palworld, CS2, Valheim, Enshrouded, Rust, Ark, Project Zomboid, etc.).
-  - **Live Progress & Speed**: Real-time progress bar, transfer rate (MB/s), downloaded size, and validation stage via Server-Sent Events (SSE).
-  - **Integrated Terminal Console**: Live streaming stdout/stderr with ANSI colors, auto-scroll, and copy-to-clipboard.
-- **🔐 Flexible Authentication**:
-  - **Anonymous Mode**: Fast downloads for free dedicated game servers.
-  - **Steam Account Mode**: Download owned games with Steam username/password.
-  - **Steam Guard 2FA Support**: Interactive pop-up prompt in the Web UI to submit two-factor authentication codes when requested by SteamCMD.
-- **⚙️ Advanced Controls**:
-  - **Force Platform Override**: Toggle `+@sSteamCmdForcePlatformType windows` to download Windows-specific server/game binaries directly to your Linux NAS.
-  - **File Validation**: Optional `validate` flag to verify game integrity.
-  - **Beta Branches**: Specify beta branches and branch passwords.
+**No source code needed on your NAS!** Deploy instantly via pre-built image from GitHub Container Registry (`ghcr.io/theretrogeekyt-dev/vaporfetch:latest`).
 
 ---
 
-## 🚀 Quickstart with Docker Compose
+## 🚀 Traditional NAS Deployment (No Source Code Required)
 
-### 1. Clone the repository
+You do **not** need to clone this repository or copy any application source files to your NAS. Use any of the traditional Docker methods below:
+
+### Option A: Single `docker run` Command (Fastest)
+
+Run this command directly in your NAS SSH terminal:
+
 ```bash
-git clone https://github.com/theretrogeekyt-dev/VaporFetch.git
-cd VaporFetch
+docker run -d \
+  --name vaporfetch \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -e PUID=1000 \
+  -e PGID=1000 \
+  -e UMASK=002 \
+  -v /mnt/nas/games:/downloads \
+  -v /path/to/appdata/vaporfetch:/config \
+  ghcr.io/theretrogeekyt-dev/vaporfetch:latest
 ```
 
-### 2. Configure `docker-compose.yml`
-Edit `docker-compose.yml` to point `/downloads` to your NAS share and set your user permissions:
+*(Replace `/mnt/nas/games` with your actual game folder path on your NAS, and `/path/to/appdata/vaporfetch` with where you want to store Steam credentials).*
+
+---
+
+### Option B: Standalone `docker-compose.yml`
+
+Create a single file named `docker-compose.yml` anywhere on your NAS (no other files needed):
 
 ```yaml
 version: '3.8'
 
 services:
   vaporfetch:
-    image: vaporfetch:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/theretrogeekyt-dev/vaporfetch:latest
     container_name: vaporfetch
     restart: unless-stopped
     ports:
       - "8080:8080"
     environment:
-      # PUID and PGID of the user on your NAS (run `id` on host)
+      # Match the user on your NAS (run `id $USER` to check)
       - PUID=1000
       - PGID=1000
       - UMASK=002
       - PORT=8080
-      # Optional default Steam account (leave blank if entering via Web UI)
+      # Optional: Default credentials (or enter on-demand in the Web UI)
       - STEAM_USERNAME=
       - STEAM_PASSWORD=
     volumes:
-      # Map your NAS share here:
+      # 1. Map your NAS games folder to /downloads
       - /mnt/nas/games:/downloads
-      # Persistent config (holds Steam Guard tokens and download history):
-      - ./config:/config
+      # 2. Map persistent config (holds Steam Guard tokens and session cache)
+      - /path/to/appdata/vaporfetch/config:/config
 ```
 
-### 3. Launch the container
+Then start the container:
 ```bash
-docker compose up -d --build
-```
-
-### 4. Access the Web UI
-Open your browser and navigate to:
-```
-http://<your-server-ip>:8080
+docker compose up -d
 ```
 
 ---
 
-## 🗄️ NAS Permission Integration (`PUID` & `PGID`)
+### Option C: Synology Container Manager / Portainer / Unraid GUI
 
-When running Docker on a NAS or host mounting SMB/NFS shares, standard containers run as `root` (UID 0). Files written to the share become locked and cannot be edited, moved, or deleted by standard NAS users over network shares.
+You can deploy directly through your NAS web interface without touching the command line:
 
-**VaporFetch** solves this by dynamically dropping privileges to your configured `PUID` and `PGID` using `gosu`:
+1. **Image Name**: `ghcr.io/theretrogeekyt-dev/vaporfetch:latest`
+2. **Port Forwarding**: Local Port `8080` ➡️ Container Port `8080`
+3. **Volume Bindings**:
+   - Local NAS Games folder (e.g. `/volume1/games` or `/mnt/user/games`) ➡️ `/downloads`
+   - AppData folder (e.g. `/volume1/docker/vaporfetch/config`) ➡️ `/config`
+4. **Environment Variables**:
+   - `PUID`: Your NAS user ID (e.g., `1026` for Synology, `99` for Unraid, `1000` for Linux)
+   - `PGID`: Your NAS group ID (e.g., `100` for Synology/Unraid, `1000` for Linux)
+   - `UMASK`: `002`
 
-| Platform | Recommended `PUID` | Recommended `PGID` | Notes |
+---
+
+## 🌐 Accessing the Web UI
+
+Once running, open your web browser:
+```
+http://<your-nas-ip>:8080
+```
+
+---
+
+## 🗄️ NAS Permission Mapping (`PUID` & `PGID`)
+
+Standard Docker containers run as `root` (UID 0). When a container creates files on an SMB, CIFS, or NFS share, standard users are blocked from editing or deleting them.
+
+**VaporFetch** dynamically matches the permissions of your NAS user:
+
+| Platform | Recommended `PUID` | Recommended `PGID` | Where to find it |
 | :--- | :--- | :--- | :--- |
-| **Synology DSM** | `1026` | `100` | SSH into DSM and run `id` to verify your admin user |
-| **Unraid** | `99` | `100` | Standard `nobody:users` permissions on Unraid |
-| **TrueNAS** | `1000` | `1000` | Check the UID/GID of your dataset owner in TrueNAS UI |
+| **Synology DSM** | `1026` | `100` | SSH into DSM and run `id` on your admin user |
+| **Unraid** | `99` | `100` | Standard Unraid `nobody:users` ID |
+| **TrueNAS** | `1000` | `1000` | Owner UID/GID of your dataset in TrueNAS UI |
 | **Linux (Ubuntu/Debian)**| `1000` | `1000` | Run `id -u` and `id -g` in your terminal |
 
-### Finding your UID and GID:
-On your host or NAS terminal, run:
-```bash
-id $USER
-# Example output: uid=1000(john) gid=1000(john) groups=1000(john),...
-```
+---
+
+## ✨ Features
+
+- **🚀 SteamCMD Engine**: Automatic installation of SteamCMD with all 32-bit Debian dependencies (`i386`) pre-configured.
+- **💾 Direct NAS Writing**: Files are saved directly with proper permissions to eliminate NAS access issues.
+- **🖥️ Modern Web UI**:
+  - **Live Steam Info**: Instant AppID lookup queries the Steam Store API for game title and cover art.
+  - **Quick-Select Presets**: One-click configuration for popular dedicated servers (Palworld, CS2, Valheim, Enshrouded, Rust, Ark, Project Zomboid, etc.).
+  - **Live Progress & Speed**: Real-time progress bar, transfer rate (MB/s), downloaded size, and validation stage via Server-Sent Events (SSE).
+  - **Integrated Terminal Console**: Live streaming stdout/stderr with ANSI colors, auto-scroll, and copy-to-clipboard.
+- **🔐 Flexible Authentication**:
+  - **Anonymous Mode**: Fast downloads for free dedicated game servers.
+  - **Steam Account Mode**: Download owned games with Steam credentials.
+  - **Steam Guard 2FA Support**: Interactive pop-up prompt in the Web UI to submit two-factor authentication codes when requested by SteamCMD.
+- **⚙️ Advanced Controls**:
+  - **Force Platform Override**: Toggle `+@sSteamCmdForcePlatformType windows` to download Windows-specific server/game binaries directly to your Linux NAS.
+  - **File Validation**: Optional `validate` flag to verify game integrity.
+  - **Beta Branches**: Specify beta branches and branch passwords.
 
 ---
 
@@ -128,54 +156,36 @@ id $USER
 
 ---
 
-## 🔐 Steam Guard & Authentication
+## 🔄 Updating the Container
 
-1. **Anonymous Downloads**:
-   - For dedicated servers (e.g., Palworld, CS2, Rust), select **Anonymous**. No account is needed.
-2. **Account Downloads**:
-   - For games requiring an active purchase license, select **Steam Account** and enter your username and password.
-   - If Steam Guard (Email or Mobile Authenticator) is enabled on your account, SteamCMD will pause and request a verification code.
-   - **VaporFetch** detects this in real time and presents an interactive dialog in the Web UI. Enter your 5-character code and click **Submit Code**.
-   - Your session token is saved in `/config`, so subsequent downloads won't prompt for 2FA again.
+Since the container runs from a pre-built image, updating is seamless:
 
----
-
-## 📁 Volume Layout
-
+```bash
+docker compose pull
+docker compose up -d
 ```
-/
-├── downloads/    <-- Mapped to your NAS share (games saved into subfolders here)
-└── config/       <-- Persistent storage (SteamCMD credentials, 2FA tokens, history)
+
+Or for `docker run`:
+```bash
+docker pull ghcr.io/theretrogeekyt-dev/vaporfetch:latest
+docker stop vaporfetch && docker rm vaporfetch
+# Re-run your docker run command
 ```
 
 ---
 
-## 🛠️ REST API Endpoints
+## 🛠️ Local Development & Building from Source
 
-For automation scripts or remote triggers, VaporFetch provides a full REST API:
+If you want to build the container image locally from source:
 
-- `GET /api/status`: Current download status, active task progress, and NAS disk capacity.
-- `GET /api/stream`: Server-Sent Events (SSE) streaming real-time logs and progress.
-- `POST /api/download`: Start a download task.
-  ```json
-  {
-    "appId": "2394010",
-    "installDir": "palworld",
-    "anonymous": true,
-    "platform": "windows",
-    "validate": true
-  }
-  ```
-- `POST /api/cancel`: Gracefully abort the active download.
-- `POST /api/steamguard`: Submit 2FA code (`{ "code": "ABC12" }`).
-- `GET /api/appinfo/:appId`: Query Steam metadata for any AppID.
-- `GET /api/storage`: Storage capacity, free space, and directory listing of `/downloads`.
-- `GET /api/history`: List past download tasks.
-- `GET /health`: Healthcheck endpoint.
+```bash
+git clone https://github.com/theretrogeekyt-dev/VaporFetch.git
+cd VaporFetch
+docker build -t vaporfetch:latest .
+```
 
 ---
 
 ## 📄 License
 
 MIT License. Feel free to use, modify, and distribute.
-

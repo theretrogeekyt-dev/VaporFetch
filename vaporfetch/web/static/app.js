@@ -284,9 +284,14 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     elements.logoutBtn?.addEventListener("click", handleLogout);
     elements.reauthBtn?.addEventListener("click", () => {
-      handleLogout().then(() => {
-        openAuthModal();
-      });
+      const hasCmdAuth = state.user && (state.user.has_steamcmd_auth || state.user.auth_method === "steamcmd");
+      if (state.user && state.user.logged_in && !hasCmdAuth) {
+        openAuthModal(true);
+      } else {
+        handleLogout().then(() => {
+          openAuthModal();
+        });
+      }
     });
 
     // Tab buttons
@@ -348,10 +353,21 @@ document.addEventListener("DOMContentLoaded", () => {
     if (elements.codeError) elements.codeError.style.display = "none";
   }
 
-  function openAuthModal() {
+  function openAuthModal(forceDirect = false) {
     elements.authModal.style.display = "flex";
     stopQRPolling();
     stopPushPolling();
+
+    if (forceDirect) {
+      if (elements.modalTabsBar) elements.modalTabsBar.style.display = "flex";
+      if (elements.loginStepSuccess) elements.loginStepSuccess.style.display = "none";
+      switchAuthTab("direct");
+      if (elements.loginUsername && state.user && state.user.username) {
+        elements.loginUsername.value = state.user.username;
+      }
+      setTimeout(() => elements.loginPassword?.focus(), 50);
+      return;
+    }
 
     if (state.user && state.user.logged_in) {
       if (elements.modalTabsBar) elements.modalTabsBar.style.display = "none";
@@ -362,9 +378,24 @@ document.addEventListener("DOMContentLoaded", () => {
       if (elements.authUsernameDisplay) elements.authUsernameDisplay.textContent = state.user.username || "-";
       if (elements.authSteamIdDisplay) elements.authSteamIdDisplay.textContent = state.user.steam_id || "Auto-detected";
       if (elements.authWebStatus) elements.authWebStatus.innerHTML = "<span style='color: #48bb78; font-weight: 600;'>✅ Connected</span>";
-      if (elements.authSteamCmdStatus) elements.authSteamCmdStatus.innerHTML = "<span style='color: #48bb78; font-weight: 600;'>✅ Active &amp; Ready</span>";
-      if (elements.authStatusAlert) elements.authStatusAlert.className = "alert alert-success";
-      if (elements.authStatusText) elements.authStatusText.textContent = `✅ Signed in as ${state.user.username}`;
+      
+      const hasCmdAuth = state.user.has_steamcmd_auth || state.user.auth_method === "steamcmd";
+      if (elements.authSteamCmdStatus) {
+        if (hasCmdAuth) {
+          elements.authSteamCmdStatus.innerHTML = "<span style='color: #48bb78; font-weight: 600;'>✅ Active &amp; Ready</span>";
+        } else {
+          elements.authSteamCmdStatus.innerHTML = "<span style='color: #f59e0b; font-weight: 600;'>⚠️ Password Required to Download</span>";
+        }
+      }
+      if (elements.authStatusAlert) elements.authStatusAlert.className = hasCmdAuth ? "alert alert-success" : "alert alert-warning";
+      if (elements.authStatusText) {
+        elements.authStatusText.textContent = hasCmdAuth
+          ? `✅ Signed in as ${state.user.username}`
+          : `⚠️ Library synced as ${state.user.username} (Password required to download)`;
+      }
+      if (elements.reauthBtn) {
+        elements.reauthBtn.textContent = hasCmdAuth ? "Sign In Again" : "🔑 Sign In to Download";
+      }
     } else {
       if (elements.modalTabsBar) elements.modalTabsBar.style.display = "flex";
       if (elements.loginStepSuccess) elements.loginStepSuccess.style.display = "none";
@@ -1172,8 +1203,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function checkSteamCmdAuthBeforeDownload() {
     if (!state.user || !state.user.logged_in) {
-      alert("Please log in with your Steam Mobile App first to start backups.");
+      alert("Please log in with your Steam account first to start backups.");
       openAuthModal();
+      return false;
+    }
+    const hasCmdAuth = state.user.has_steamcmd_auth || state.user.auth_method === "steamcmd";
+    if (state.user.auth_method === "qr" && !hasCmdAuth) {
+      alert(
+        "SteamCMD login required to download games.\n\n" +
+        "Steam Mobile QR Code only authorizes library sync. To download and backup games, please sign in with your Password & Steam Guard in the Sign In tab."
+      );
+      openAuthModal(true);
       return false;
     }
     return true;
@@ -1228,6 +1268,12 @@ document.addEventListener("DOMContentLoaded", () => {
   async function queueAppId(appid, name = null) {
     if (!checkSteamCmdAuthBeforeDownload()) return;
     const platform = elements.platformSelect.value;
+    const cardBtn = document.querySelector(`.game-card[data-appid="${appid}"] .quick-backup-btn`);
+    const origText = cardBtn ? cardBtn.textContent : null;
+    if (cardBtn) {
+      cardBtn.textContent = "⏳ Adding...";
+      cardBtn.disabled = true;
+    }
     try {
       const res = await fetch("/api/queue/add", {
         method: "POST",
@@ -1236,9 +1282,30 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       const data = await res.json();
       if (data.status === "exists") {
+        if (cardBtn) {
+          cardBtn.textContent = "Already Queued";
+          setTimeout(() => {
+            cardBtn.textContent = origText;
+            cardBtn.disabled = false;
+          }, 2000);
+        }
         alert(data.message);
+        document.querySelector('[data-tab="downloadsTab"]')?.click();
+      } else {
+        if (cardBtn) {
+          cardBtn.textContent = "✓ Queued!";
+          setTimeout(() => {
+            cardBtn.textContent = origText;
+            cardBtn.disabled = false;
+          }, 2000);
+        }
+        document.querySelector('[data-tab="downloadsTab"]')?.click();
       }
     } catch (e) {
+      if (cardBtn) {
+        cardBtn.textContent = origText;
+        cardBtn.disabled = false;
+      }
       alert(`Error adding to queue: ${e.message}`);
     }
   }

@@ -474,6 +474,18 @@ class TestSteamCMDParser(unittest.TestCase):
                  patch("vaporfetch.steamcmd.DATA_DIR", tmppath):
                 self.assertFalse(has_steamcmd_cached_credentials("reaper360vr"))
 
+            # If sentry file ssfn* exists and loginusers has RememberPassword 1, should return True!
+            sentry_file = tmppath / "Steam" / "ssfn1234567890"
+            sentry_file.write_text("sentry_data", encoding="utf-8")
+            loginusers_file = tmppath / "Steam" / "config" / "loginusers.vdf"
+            loginusers_file.write_text(
+                '"users" { "76561199132013751" { "AccountName" "reaper360vr" "RememberPassword" "1" } }',
+                encoding="utf-8"
+            )
+            with patch("vaporfetch.steamcmd.Path.home", return_value=tmppath), \
+                 patch("vaporfetch.steamcmd.DATA_DIR", tmppath):
+                self.assertTrue(has_steamcmd_cached_credentials("reaper360vr"))
+
     def test_submit_2fa_code_includes_code_in_login_cmd(self):
         from unittest.mock import patch, MagicMock
         from vaporfetch.steamcmd import submit_2fa_code, auth_session

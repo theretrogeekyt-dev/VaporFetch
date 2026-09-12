@@ -83,6 +83,25 @@ class TestDownloader(unittest.TestCase):
             self.assertFalse(res["success"])
             self.assertIn("Steam Mobile QR Code only authorizes library sync", res["error"])
 
+    def test_run_app_download_with_steamcmd_auth_session_succeeds(self):
+        from unittest.mock import patch, MagicMock
+        from vaporfetch.steamcmd import run_app_download, auth_session
+        auth_session.reset()
+        steamcmd_session = {"username": "reaper360vr", "logged_in": True, "auth_method": "steamcmd"}
+        mock_proc = MagicMock()
+        mock_proc.stdout.readline.return_value = ""
+        mock_proc.poll.return_value = 0
+        with patch("vaporfetch.steamcmd.has_steamcmd_cached_credentials", return_value=False), \
+             patch("vaporfetch.steamcmd.get_current_session", return_value=steamcmd_session), \
+             patch("subprocess.Popen", return_value=mock_proc), \
+             patch("os.makedirs"):
+            res = run_app_download(
+                appid=2280,
+                install_dir="/downloads/DOOM",
+                username="reaper360vr",
+            )
+            self.assertTrue(res["success"])
+
     def test_run_app_download_sanitizes_plus_in_cmd(self):
         from unittest.mock import patch, MagicMock
         from vaporfetch.steamcmd import run_app_download, auth_session

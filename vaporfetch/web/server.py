@@ -103,7 +103,10 @@ if FastAPI is not None:
         session["has_api_key"] = bool(api_key)
         session["auth_method"] = session.get("auth_method", "qr")
         username = session.get("username", "")
-        session["has_steamcmd_auth"] = bool(session.get("logged_in") and username)
+        has_cached = has_steamcmd_cached_credentials(username)
+        has_pwd = bool(auth_session.pending_password and auth_session.username == username)
+        is_steamcmd_auth = bool(session.get("logged_in") and session.get("auth_method") == "steamcmd")
+        session["has_steamcmd_auth"] = bool(session.get("logged_in") and username and (has_cached or has_pwd or is_steamcmd_auth))
         return {
             "version": VERSION,
             "session": session,

@@ -1,8 +1,11 @@
 import time
 import threading
 import queue
+import logging
 from typing import Dict, List, Any, Optional, Set
 from collections import deque
+
+logger = logging.getLogger("vaporfetch.downloader")
 
 from vaporfetch.config import (
     load_settings,
@@ -198,107 +201,113 @@ class DownloadManager:
     def _worker_loop(self):
         """Sequential background processor for queued game downloads."""
         while True:
-            task = None
-            with self.lock:
-                if self.queue:
-                    task = self.queue.pop(0)
-                    self.current_task = task
+            try:
+                task = None
+                with self.lock:
+                    if self.queue:
+                        task = self.queue.pop(0)
+                        self.current_task = task
+                    else:
+                        self.current_task = None
+
+                if not task:
+                    time.sleep(1.0)
+                    continue
+
+                session = get_current_session()
+                username = session.get("username")
+                if not username:
+                    task.status = "failed"
+                    task.error = "Steam account not logged in."
+                    self.add_log(f"Cannot download '{task.name}': Not logged in.")
+                    with self.lock:
+                        self.history.append(task)
+                        self.current_task = None
+                    self.broadcast("queue_update", self.get_queue_state())
+                    continue
+
+                auth_user = getattr(task, "username", None) or username
+                has_cached = has_steamcmd_cached_credentials(auth_user)
+                has_pwd = bool(auth_session.pending_password and auth_session.username == auth_user)
+                is_steamcmd_auth = bool(session.get("logged_in") and session.get("auth_method") == "steamcmd")
+
+                if not has_cached and not has_pwd and not is_steamcmd_auth:
+                    task.status = "failed"
+                    if session.get("auth_method") == "qr":
+                        task.error = "SteamCMD login required to download. Please sign in via Account -> Sign In (Password & Steam Guard)."
+                        self.add_log(
+                            f"Cannot download '{task.name}': SteamCMD requires authentication. "
+                            "Steam Mobile QR Code only authorizes library sync; downloading requires signing in with Password & Steam Guard. "
+                            "Please click 'Account' and use 'Sign In'."
+                        )
+                    else:
+                        task.error = "Steam login required. Please sign in via Account."
+                        self.add_log(
+                            f"Cannot download '{task.name}': Not logged in to Steam. "
+                            "Please click 'Account' and sign in to authenticate."
+                        )
+                    with self.lock:
+                        self.history.append(task)
+                        self.current_task = None
+                    self.broadcast("queue_update", self.get_queue_state())
+                    continue
+
+                task.status = "downloading"
+                task.started_at = time.time()
+                self.cancel_event.clear()
+                self.add_log(f"=== Starting backup of '{task.name}' (AppID: {task.appid}) ===")
+                self.broadcast("queue_update", self.get_queue_state())
+
+                settings = load_settings()
+                install_dir = str(get_game_install_dir(task.name, task.appid))
+                validate = settings.get("validate_downloads", True)
+
+                def progress_callback(info: Dict[str, Any]):
+                    task.percent = info.get("percent", 0.0)
+                    task.current_bytes = info.get("current_bytes", 0)
+                    task.total_bytes = info.get("total_bytes", 0)
+                    task.speed_bps = info.get("speed_bps", 0.0)
+                    task.eta_seconds = info.get("eta_seconds", 0)
+                    self.broadcast("progress", task.to_dict())
+
+                def log_callback(line: str):
+                    self.add_log(f"[{task.appid}] {line}")
+
+                result = run_app_download(
+                    appid=task.appid,
+                    install_dir=install_dir,
+                    username=auth_user,
+                    platform=task.platform,
+                    validate=validate,
+                    progress_cb=progress_callback,
+                    log_cb=log_callback,
+                    cancel_event=self.cancel_event,
+                )
+
+                task.finished_at = time.time()
+                if result.get("success"):
+                    task.status = "completed"
+                    task.percent = 100.0
+                    self.add_log(f"Successfully backed up '{task.name}' to {install_dir}!")
+                elif self.cancel_event.is_set():
+                    task.status = "cancelled"
+                    task.error = "Cancelled by user"
+                    self.add_log(f"Download cancelled for '{task.name}'.")
                 else:
+                    task.status = "failed"
+                    task.error = result.get("error", "Unknown error")
+                    self.add_log(f"Failed to backup '{task.name}': {task.error}")
+
+                with self.lock:
+                    self.history.append(task)
                     self.current_task = None
 
-            if not task:
+                self.broadcast("queue_update", self.get_queue_state())
+                time.sleep(0.5)
+
+            except Exception as e:
+                logger.exception(f"Unexpected error in downloader worker loop: {e}")
                 time.sleep(1.0)
-                continue
-
-            session = get_current_session()
-            username = session.get("username")
-            if not username:
-                task.status = "failed"
-                task.error = "Steam account not logged in."
-                self.add_log(f"Cannot download '{task.name}': Not logged in.")
-                with self.lock:
-                    self.history.append(task)
-                    self.current_task = None
-                self.broadcast("queue_update", self.get_queue_state())
-                continue
-
-            auth_user = getattr(task, "username", None) or username
-            has_cached = has_steamcmd_cached_credentials(auth_user)
-            has_pwd = bool(auth_session.pending_password and auth_session.username == auth_user)
-
-            if not has_cached and not has_pwd:
-                task.status = "failed"
-                if session.get("auth_method") == "qr":
-                    task.error = "SteamCMD login required to download. Please sign in via Account -> Sign In (Password & Steam Guard)."
-                    self.add_log(
-                        f"Cannot download '{task.name}': SteamCMD requires authentication. "
-                        "Steam Mobile QR Code only authorizes library sync; downloading requires signing in with Password & Steam Guard. "
-                        "Please click 'Account' and use 'Sign In'."
-                    )
-                else:
-                    task.error = "Steam login required. Please sign in via Account."
-                    self.add_log(
-                        f"Cannot download '{task.name}': Not logged in to Steam. "
-                        "Please click 'Account' and sign in to authenticate."
-                    )
-                with self.lock:
-                    self.history.append(task)
-                    self.current_task = None
-                self.broadcast("queue_update", self.get_queue_state())
-                continue
-
-            task.status = "downloading"
-            task.started_at = time.time()
-            self.cancel_event.clear()
-            self.add_log(f"=== Starting backup of '{task.name}' (AppID: {task.appid}) ===")
-            self.broadcast("queue_update", self.get_queue_state())
-
-            settings = load_settings()
-            install_dir = str(get_game_install_dir(task.name, task.appid))
-            validate = settings.get("validate_downloads", True)
-
-            def progress_callback(info: Dict[str, Any]):
-                task.percent = info.get("percent", 0.0)
-                task.current_bytes = info.get("current_bytes", 0)
-                task.total_bytes = info.get("total_bytes", 0)
-                task.speed_bps = info.get("speed_bps", 0.0)
-                task.eta_seconds = info.get("eta_seconds", 0)
-                self.broadcast("progress", task.to_dict())
-
-            def log_callback(line: str):
-                self.add_log(f"[{task.appid}] {line}")
-
-            result = run_app_download(
-                appid=task.appid,
-                install_dir=install_dir,
-                username=username,
-                platform=task.platform,
-                validate=validate,
-                progress_cb=progress_callback,
-                log_cb=log_callback,
-                cancel_event=self.cancel_event,
-            )
-
-            task.finished_at = time.time()
-            if result.get("success"):
-                task.status = "completed"
-                task.percent = 100.0
-                self.add_log(f"Successfully backed up '{task.name}' to {install_dir}!")
-            elif self.cancel_event.is_set():
-                task.status = "cancelled"
-                task.error = "Cancelled by user"
-                self.add_log(f"Download cancelled for '{task.name}'.")
-            else:
-                task.status = "failed"
-                task.error = result.get("error", "Unknown error")
-                self.add_log(f"Failed to backup '{task.name}': {task.error}")
-
-            with self.lock:
-                self.history.append(task)
-                self.current_task = None
-
-            self.broadcast("queue_update", self.get_queue_state())
-            time.sleep(0.5)
 
 manager = DownloadManager()
 

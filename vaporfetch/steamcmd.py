@@ -333,6 +333,19 @@ def has_steamcmd_cached_credentials(username: str = "") -> bool:
         DATA_DIR / "steam_root",
         DATA_DIR / "steam_share",
     ]
+    has_sentry = False
+    for base in search_dirs:
+        if base.exists():
+            try:
+                sentry_files = [f for f in base.glob("ssfn*") if f.is_file() and f.stat().st_size > 0]
+                if not sentry_files and (base / "steam").exists():
+                    sentry_files = [f for f in (base / "steam").glob("ssfn*") if f.is_file() and f.stat().st_size > 0]
+                if sentry_files or (base / "sentry.bin").is_file():
+                    has_sentry = True
+                    break
+            except Exception:
+                pass
+
     for base in search_dirs:
         # 1. Check loginusers.vdf
         for cand in [base / "config" / "loginusers.vdf", base / "loginusers.vdf"]:
@@ -341,13 +354,15 @@ def has_steamcmd_cached_credentials(username: str = "") -> bool:
                     text = cand.read_text(encoding="utf-8", errors="ignore")
                     if uname:
                         if uname in text.lower() or f'"{uname}"' in text.lower():
-                                # Check if companion config.vdf has a RefreshToken stub (QR login token)
-                                cfg = base / "config" / "config.vdf"
-                                if cfg.exists():
-                                    cfg_text = cfg.read_text(encoding="utf-8", errors="ignore")
-                                    if re.search(rf'"{re.escape(uname)}"\s*\{{[^}}]*"RefreshToken"', cfg_text, re.IGNORECASE):
-                                        continue
+                            if has_sentry and "rememberpassword" in text.lower():
                                 return True
+                            # Check if companion config.vdf has a RefreshToken stub (QR login token)
+                            cfg = base / "config" / "config.vdf"
+                            if cfg.exists():
+                                cfg_text = cfg.read_text(encoding="utf-8", errors="ignore")
+                                if re.search(rf'"{re.escape(uname)}"\s*\{{[^}}]*"RefreshToken"', cfg_text, re.IGNORECASE):
+                                    continue
+                            return True
                     elif "accountname" in text.lower() or "personaname" in text.lower():
                         return True
                 except Exception:
@@ -1275,7 +1290,8 @@ def run_app_download(
 
     # Verify credentials exist before launching SteamCMD
     has_cached = has_steamcmd_cached_credentials(active_user)
-    if not has_cached and not pwd:
+    is_steamcmd_auth = bool(session.get("logged_in") and session.get("auth_method") == "steamcmd")
+    if not has_cached and not pwd and not is_steamcmd_auth:
         if session.get("auth_method") == "qr":
             err = (
                 f"SteamCMD requires authentication to download '{active_user}'s games. "

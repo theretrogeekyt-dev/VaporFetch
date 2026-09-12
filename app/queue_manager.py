@@ -3,6 +3,7 @@ import os
 import time
 import json
 import uuid
+import shutil
 import asyncio
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
@@ -27,6 +28,83 @@ def sanitize_filename(name: str) -> str:
     """Sanitizes directory names to avoid filesystem collisions or illegal characters."""
     sanitized = re.sub(r'[\\/*?:"<>|]', "", name).strip()
     return sanitized or "SteamGame"
+
+
+def post_process_game_directory(install_path: Path, log_tail: Optional[List[str]] = None):
+    """
+    Cleans up post-download game directory:
+    1. Flattens SteamCMD's nested steamapps/common/<Game> structure directly into install_path.
+    2. Moves any appmanifest_*.acf into install_path and completely removes the steamapps folder.
+    3. Renames any CommonRedist folder (_CommonRedist, CommonRedist, etc.) to 'Redistrutables'.
+    """
+    def log(msg: str):
+        if log_tail is not None:
+            log_tail.append(f"[PostProcess] {msg}")
+
+    try:
+        # Step 1: Look for steamapps folder (steamapps or steam apps, case-insensitive)
+        steamapps_dirs = [
+            item for item in install_path.iterdir() 
+            if item.is_dir() and item.name.lower() in ("steamapps", "steam apps")
+        ]
+
+        for s_dir in steamapps_dirs:
+            common_dir = None
+            for sub in s_dir.iterdir():
+                if sub.is_dir() and sub.name.lower() == "common":
+                    common_dir = sub
+                elif sub.is_file() and sub.name.startswith("appmanifest_"):
+                    # Preserve appmanifest in install_path root
+                    target_manifest = install_path / sub.name
+                    if not target_manifest.exists():
+                        try:
+                            shutil.move(str(sub), str(target_manifest))
+                        except Exception:
+                            pass
+
+            if common_dir and common_dir.exists():
+                common_entries = list(common_dir.iterdir())
+                if len(common_entries) == 1 and common_entries[0].is_dir():
+                    game_subfolder = common_entries[0]
+                    log(f"Flattening '{game_subfolder.name}' directly into '{install_path.name}'...")
+                    for game_item in list(game_subfolder.iterdir()):
+                        dest = install_path / game_item.name
+                        if dest.exists():
+                            if dest.is_dir():
+                                shutil.rmtree(dest, ignore_errors=True)
+                            else:
+                                dest.unlink(missing_ok=True)
+                        shutil.move(str(game_item), str(dest))
+                else:
+                    for common_item in common_entries:
+                        dest = install_path / common_item.name
+                        if dest.exists():
+                            if dest.is_dir():
+                                shutil.rmtree(dest, ignore_errors=True)
+                            else:
+                                dest.unlink(missing_ok=True)
+                        shutil.move(str(common_item), str(dest))
+
+            # Remove the steamapps folder completely
+            log(f"Removed '{s_dir.name}' folder.")
+            shutil.rmtree(s_dir, ignore_errors=True)
+
+        # Step 2: Rename any commonredist folder to Redistrutables
+        for root, dirs, files in os.walk(install_path, topdown=False):
+            for d_name in list(dirs):
+                clean = d_name.lower().replace("_", "").replace("-", "").strip()
+                if clean == "commonredist":
+                    src_dir = Path(root) / d_name
+                    dest_dir = Path(root) / "Redistrutables"
+                    if src_dir != dest_dir:
+                        log(f"Renamed '{src_dir.name}' to 'Redistrutables'.")
+                        if dest_dir.exists():
+                            shutil.rmtree(dest_dir, ignore_errors=True)
+                        src_dir.rename(dest_dir)
+
+    except Exception as e:
+        log(f"Warning during directory cleanup: {e}")
+
 
 
 class QueueItem(BaseModel):
@@ -310,11 +388,13 @@ class DownloadQueueManager:
             returncode = await process.wait()
 
             if returncode == 0 and not item.error:
+                item.step = "Cleaning structure"
+                post_process_game_directory(install_path, item.log_tail)
                 item.status = "completed"
                 item.progress = 100.0
                 item.step = "Completed"
                 item.completed_at = time.time()
-                item.log_tail.append(f"App {item.appid} ({item.name}) downloaded successfully to {install_path}.")
+                item.log_tail.append(f"App {item.appid} ({item.name}) downloaded and structured successfully in {install_path}.")
             elif item.status == "cancelled":
                 item.log_tail.append("Process cancelled.")
             else:

@@ -78,8 +78,14 @@ COMMON_STEAM_APPS: Dict[int, str] = {
     2050650: "Resident Evil 4",
 }
 
-# Known internal Steam tools, dedicated servers, runtimes, and engine packages
-KNOWN_TOOLS: Dict[int, str] = {
+# Allowed retail games that might otherwise trigger keywords (e.g. "Mod")
+ALLOWED_GAMES: Set[int] = {
+    4000,   # Garry's Mod
+    362890, # Black Mesa
+}
+
+# Known internal Steam tools, runtimes, software, mods, and dedicated servers
+KNOWN_NON_GAMES: Dict[int, str] = {
     4: "Source SDK Base",
     5: "Dedicated Server",
     7: "Steam Client",
@@ -127,15 +133,87 @@ KNOWN_TOOLS: Dict[int, str] = {
     2230260: "Proton Next",
     2348520: "Proton 8.0",
     2805730: "Proton 9.0",
+    # Known Software & Applications
+    1840: "Source Filmmaker",
+    365670: "Blender",
+    431960: "Wallpaper Engine",
+    431730: "Aseprite",
+    223850: "3DMark",
+    524390: "PCMark 10",
+    484580: "GameMaker Studio 2",
+    217370: "GameMaker: Studio",
+    363890: "RPG Maker MV",
+    1096900: "RPG Maker MZ",
+    220700: "RPG Maker VX Ace",
+    235900: "RPG Maker XP",
+    362870: "RPG Maker 2003",
+    383730: "RPG Maker 2000",
+    286010: "VoiceAttack",
+    629520: "Soundpad",
+    400040: "ShareX",
+    1118310: "RetroArch",
+    367670: "Controller Companion",
+    993090: "Lossless Scaling",
+    227260: "DisplayFusion",
+    1905180: "OBS Studio",
+    404790: "Godot Engine",
+    388080: "Borderless Gaming",
+    1079260: "EVGA Precision X1",
+    1009850: "OVR Advanced Settings",
+    1173510: "XSOverlay",
+    1494460: "Desktop+",
+    1192380: "Stop Sign VR",
+    908520: "fpsVR",
+    382110: "Virtual Desktop",
+    # Known Mods
+    17500: "Zombie Panic! Source",
+    17510: "Age of Chivalry",
+    17520: "Synergy",
+    17530: "D.I.P.R.I.P.",
+    17550: "Eternal Silence",
+    17570: "Pirates, Vikings, and Knights II",
+    17730: "Smashball",
+    218350: "Gunman Chronicles",
+    223710: "Cry of Fear",
+    235780: "MINERVA: Metastasis",
+    258380: "Rexaura",
+    280740: "Aperture Tag: The Paint Gun Testing Initiative",
+    286080: "Thinking with Time Machine",
+    290930: "Half-Life 2: Update",
+    317400: "Portal Stories: Mel",
+    365300: "Transmissions: Element 120",
+    397460: "Half-Life 2: Year Long Horror",
+    587650: "Half-Life 2: DownFall",
+    601360: "Portal: Revolution",
+    679270: "Half-Life: C.A.G.E.D.",
+    714070: "Entropy : Zero",
+    976620: "Enderal: Forgotten Stories",
+    1014940: "Nehrim: At Fate's Edge",
+    1467450: "The Chronicles of Myrtana: Archolos",
+    1583720: "Entropy : Zero 2",
 }
+# Backward compatibility alias
+KNOWN_TOOLS = KNOWN_NON_GAMES
 
 
-def is_tool_or_non_game(appid: int, name: str) -> bool:
+def is_tool_or_non_game(appid: int, name: str, app_type: Optional[str] = None) -> bool:
     """
-    Determine whether an AppID or title corresponds to an internal tool,
-    unreleased/unnamed item, dedicated server, runtime, or non-game utility package.
+    Determine whether an AppID or title corresponds to a non-game
+    (DLC, mod, software, tool, dedicated server, runtime, beta, demo, soundtrack, or unreleased package).
+    Returns True if the item is NOT a standard game.
     """
-    if appid in KNOWN_TOOLS:
+    if appid in ALLOWED_GAMES:
+        return False
+
+    if appid in KNOWN_NON_GAMES:
+        return True
+
+    # Check explicit app_type parameter or cached type from Steam API / SteamSpy
+    detected_type = (app_type or (resolver.app_types.get(appid, "") if "resolver" in globals() else "")).lower()
+    if detected_type in (
+        "dlc", "mod", "software", "tool", "demo", "music", "video",
+        "series", "episode", "hardware", "application"
+    ):
         return True
 
     clean = (name or "").strip()
@@ -167,80 +245,130 @@ def is_tool_or_non_game(appid: int, name: str) -> bool:
     ):
         return True
 
-    # 3. Dedicated Servers & Server Packages
+    # 3. DLC Detection (expansion packs, season passes, cosmetics, item packs, soundtracks, artbooks)
+    if re.search(
+        r"\b(dlc|expansion pack|expansion pass|season pass|annual pass|battle pass|"
+        r"soundtrack|artbook|art book|digital artbook|digital art book|bonus content|"
+        r"skin pack|character pack|costume pack|item pack|weapon pack|content pack|"
+        r"asset pack|upgrade pack|map pack|voice pack|audio pack|music pack|"
+        r"supporter pack|founder pack|founders pack|pre-order bonus|pre-purchase bonus)\b",
+        lower,
+    ):
+        return True
+    if (
+        lower.endswith(" dlc")
+        or lower.endswith(" (dlc)")
+        or lower.endswith(" - dlc")
+        or "dlc: " in lower
+        or ": dlc" in lower
+        or " dlc -" in lower
+    ):
+        return True
+    if (
+        "deluxe upgrade" in lower
+        or "founder upgrade" in lower
+        or "supporter upgrade" in lower
+        or "deluxe edition content" in lower
+    ):
+        return True
+    if (
+        "add-on support" in lower
+        or "addon support" in lower
+        or lower.endswith(" add-on")
+        or lower.endswith(" addon")
+        or lower.endswith(" (add-on)")
+        or lower.endswith(" (addon)")
+    ):
+        return True
+
+    # 4. Mod Detection (community mods, source mods, workshop mods)
+    if (
+        lower.endswith(" mod")
+        or lower.endswith(" mods")
+        or lower.endswith(" (mod)")
+        or lower.endswith(" - mod")
+        or ": mod" in lower
+        or " mod: " in lower
+        or " mod - " in lower
+        or "- mod - " in lower
+    ):
+        return True
+    if (
+        "source mod" in lower
+        or "community mod" in lower
+        or "workshop mod" in lower
+        or "modification" in lower
+    ):
+        return True
+
+    # 5. Software & Utility Detection
+    if re.search(
+        r"\b(software|utility|utilities|benchmark|filmmaker|level editor|map editor|world editor|scenario editor)\b",
+        lower,
+    ):
+        return True
+    software_keywords = [
+        "wallpaper engine",
+        "godot engine",
+        "rpg maker",
+        "gamemaker",
+        "visual novel maker",
+        "blender",
+        "aseprite",
+        "soundpad",
+        "voiceattack",
+        "sharex",
+        "lossless scaling",
+        "displayfusion",
+        "obs studio",
+        "borderless gaming",
+        "controller companion",
+        "virtual desktop",
+        "fpsvr",
+        "3dmark",
+        "pcmark",
+        "vrmark",
+        "ovr advanced settings",
+        "xsoverlay",
+        "desktop+",
+        "stop sign vr",
+    ]
+    for sk in software_keywords:
+        if sk in lower:
+            return True
+    if lower.endswith(" driver") or lower.endswith(" drivers"):
+        return True
+
+    # 6. Dedicated Servers & Server Packages
     if (
         "dedicated server" in lower
         or "linux dedicated server" in lower
         or lower.endswith(" server")
+        or lower.endswith(" servers")
         or " - server" in lower
         or " server " in lower
         or lower.endswith(" ds")
     ):
         return True
 
-    # 4. Authoring tools, publishing tools, editors, depots, SDKs, runtimes, test/betas
-    tool_keywords = [
-        "authoring tool",
-        "authoring tools",
-        "publishing tool",
-        "publishing tools",
-        "add-on support",
-        "addon support",
-        "workshop tool",
-        "workshop tools",
-        "mod tool",
-        "mod tools",
-        "modding tool",
-        "modding tools",
-        "creation kit",
-        "devkit",
-        "redistributable",
-        "redistributables",
-        "soundtrack",
-        "official soundtrack",
-        "original soundtrack",
-        "bonus content",
-        "artbook",
-        "digital artbook",
-        "art book",
-        "digital art book",
-        "strategy guide",
-        "official guide",
-        "making of ",
-        "playtest",
-        "sdk",
-        "benchmark",
-        "translation server",
-        "content system",
-        "trailer",
-        "teaser",
-    ]
-    for kw in tool_keywords:
-        if kw in lower:
-            return True
-
-    # 5. Depot packages (e.g. "Dota 2 - English Depot", "Depot", "Content Depot")
-    if "depot" in lower:
-        return True
-
-    # 6. Standalone tools or editor packages (ends with 'tool', 'tools', 'editor')
+    # 7. Depots, SDKs, authoring/publishing tools
     if (
-        lower.endswith(" tool")
-        or lower.endswith(" tools")
-        or lower.endswith(" editor")
-        or " tools -" in lower
-        or " tool -" in lower
-        or " tools (" in lower
-        or " tool (" in lower
-        or " editor -" in lower
-        or " editor (" in lower
-        or " level editor" in lower
-        or " map editor" in lower
-        or " world editor" in lower
+        "depot" in lower
+        or "authoring tool" in lower
+        or "authoring tools" in lower
+        or "publishing tool" in lower
+        or "publishing tools" in lower
+        or "creation kit" in lower
+        or "devkit" in lower
+        or "sdk" in lower
+        or "redistributable" in lower
+        or "redistributables" in lower
+        or "translation server" in lower
+        or "content system" in lower
     ):
         return True
 
-    # 7. Betas, tests, prototypes, samples, demos, soundtracks
+    # 8. Betas, Demos, Tests, Alphas, Samples, Teasers, OSTs
     if (
         lower.endswith(" - beta")
         or lower.endswith(" beta")
@@ -268,20 +396,40 @@ def is_tool_or_non_game(appid: int, name: str) -> bool:
         or " closed beta" in lower
         or " open beta" in lower
         or " test server" in lower
+        or " test branch" in lower
+        or " beta branch" in lower
         or " ost" in lower
         or lower.endswith(" ost")
         or " (ost)" in lower
         or " - ost" in lower
+        or "playtest" in lower
+        or "trailer" in lower
+    ):
+        return True
+
+    # 9. Standalone Tools or Editor Packages
+    if (
+        lower.endswith(" tool")
+        or lower.endswith(" tools")
+        or lower.endswith(" editor")
+        or " tools -" in lower
+        or " tool -" in lower
+        or " tools (" in lower
+        or " tool (" in lower
     ):
         return True
 
     return False
+
+APP_TYPES_CACHE_FILE = DATA_DIR / "app_types_cache.json"
+
 
 class AppResolver:
     """Resolves Steam AppIDs to game titles using local cache, SteamSpy, and Steam Web API."""
     def __init__(self):
         self.app_map: Dict[int, str] = dict(COMMON_STEAM_APPS)
         self.app_map.update(KNOWN_TOOLS)
+        self.app_types: Dict[int, str] = {}
         self._has_attempted_update = False
         self._load_cache()
 
@@ -294,9 +442,19 @@ class AppResolver:
                         self.app_map[int(k)] = v
             except Exception as e:
                 print(f"[VaporFetch] Warning: Failed to load app cache: {e}")
+        if APP_TYPES_CACHE_FILE.exists():
+            try:
+                with open(APP_TYPES_CACHE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    for k, v in data.items():
+                        self.app_types[int(k)] = v
+            except Exception:
+                pass
 
     def save_cache(self) -> None:
         safe_write_json(APP_CACHE_FILE, self.app_map)
+        if self.app_types:
+            safe_write_json(APP_TYPES_CACHE_FILE, self.app_types)
 
     def update_from_steam_api(self) -> bool:
         """Download Steam AppID master list if available."""
@@ -343,8 +501,16 @@ class AppResolver:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 name = (data.get("name") or "").strip()
+                genre = (data.get("genre") or "").strip().lower()
                 if name and not name.lower().startswith("app_"):
                     self.app_map[appid] = name
+                    software_genres = (
+                        "utilities", "animation & modeling", "video production",
+                        "game development", "design & illustration", "photo editing",
+                        "audio production", "education", "software training", "web publishing"
+                    )
+                    if any(sg in genre for sg in software_genres):
+                        self.app_types[appid] = "software"
                     self.save_cache()
                     return name
         except Exception:
@@ -360,7 +526,11 @@ class AppResolver:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if str(appid) in data and data[str(appid)].get("success"):
-                    name = data[str(appid)]["data"].get("name", "").strip()
+                    app_data = data[str(appid)]["data"]
+                    name = app_data.get("name", "").strip()
+                    app_type = (app_data.get("type") or "").strip().lower()
+                    if app_type:
+                        self.app_types[appid] = app_type
                     if name:
                         self.app_map[appid] = name
                         self.save_cache()

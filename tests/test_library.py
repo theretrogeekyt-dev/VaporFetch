@@ -74,6 +74,37 @@ class TestLibrary(unittest.TestCase):
         self.assertFalse(is_tool_or_non_game(620, "Portal 2"))
         self.assertFalse(is_tool_or_non_game(730, "Counter-Strike 2"))
 
+        # Test DLCs
+        self.assertTrue(is_tool_or_non_game(226320, "Skyrim: Dragonborn DLC"))
+        self.assertTrue(is_tool_or_non_game(364970, "Fallout 4 - Season Pass"))
+        self.assertTrue(is_tool_or_non_game(214933, "Borderlands 2: Character Pack"))
+        self.assertTrue(is_tool_or_non_game(209000, "Witcher 3 - Expansion Pass"))
+        self.assertTrue(is_tool_or_non_game(259380, "PAYDAY 2: Gage Weapon Pack"))
+
+        # Test Mods
+        self.assertTrue(is_tool_or_non_game(317400, "Portal Stories: Mel"))
+        self.assertTrue(is_tool_or_non_game(290930, "Half-Life 2: Update"))
+        self.assertTrue(is_tool_or_non_game(601360, "Portal: Revolution"))
+        self.assertTrue(is_tool_or_non_game(714070, "Entropy : Zero"))
+        self.assertTrue(is_tool_or_non_game(17510, "Age of Chivalry"))
+        self.assertTrue(is_tool_or_non_game(17520, "Synergy"))
+        self.assertTrue(is_tool_or_non_game(99999, "Half-Life 2 Mod"))
+
+        # Test Software & Applications
+        self.assertTrue(is_tool_or_non_game(431960, "Wallpaper Engine"))
+        self.assertTrue(is_tool_or_non_game(365670, "Blender"))
+        self.assertTrue(is_tool_or_non_game(431730, "Aseprite"))
+        self.assertTrue(is_tool_or_non_game(223850, "3DMark"))
+        self.assertTrue(is_tool_or_non_game(629520, "Soundpad"))
+        self.assertTrue(is_tool_or_non_game(286010, "VoiceAttack"))
+        self.assertTrue(is_tool_or_non_game(404790, "Godot Engine"))
+        self.assertTrue(is_tool_or_non_game(1096900, "RPG Maker MZ"))
+        self.assertTrue(is_tool_or_non_game(1905180, "OBS Studio"))
+
+        # Allowed retail games
+        self.assertFalse(is_tool_or_non_game(4000, "Garry's Mod"))
+        self.assertFalse(is_tool_or_non_game(362890, "Black Mesa"))
+
     def test_app_resolver_steamspy(self):
         from unittest.mock import patch, MagicMock
         import json

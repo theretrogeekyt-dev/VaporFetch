@@ -8,7 +8,8 @@ from app.config import (
     STEAM_HOME_DIR, 
     load_settings, 
     save_settings, 
-    sync_steam_sentry_files
+    sync_steam_credentials,
+    has_steam_credentials
 )
 
 class SteamCmdAuthManager:
@@ -21,9 +22,9 @@ class SteamCmdAuthManager:
 
     def get_status(self) -> Dict[str, Any]:
         settings = load_settings()
-        sync_steam_sentry_files()
+        sync_steam_credentials()
         sentry_files = list(STEAM_HOME_DIR.glob("ssfn*"))
-        is_authorized = bool(settings.get("steamcmd_authorized", False) or (len(sentry_files) > 0 and settings.get("steamcmd_username")))
+        is_authorized = has_steam_credentials()
         
         return {
             "authorized": is_authorized,
@@ -124,8 +125,8 @@ class SteamCmdAuthManager:
             if returncode == 0 or self.state == "success":
                 self.state = "success"
                 self.status_message = "Device authorized successfully! One and done — future downloads will run without prompts."
-                # Sync new sentry files to persistent volume
-                sync_steam_sentry_files()
+                # Sync new sentry files and config.vdf to persistent volume
+                sync_steam_credentials()
                 save_settings({
                     "steamcmd_authorized": True,
                     "steamcmd_username": username,

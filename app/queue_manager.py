@@ -16,7 +16,8 @@ from app.config import (
     STEAMCMD_BIN,
     load_settings,
     save_settings,
-    sync_steam_sentry_files
+    sync_steam_credentials,
+    has_steam_credentials
 )
 
 QUEUE_FILE = DATA_DIR / "queue.json"
@@ -314,10 +315,9 @@ class DownloadQueueManager:
         if platform_type in ("windows", "linux", "macos"):
             cmd.extend([f"+@sSteamCmdForcePlatformType", platform_type])
 
-        # Prepare Steam sentry files and check authorization
-        sync_steam_sentry_files()
-        sentry_files = list(STEAM_HOME_DIR.glob("ssfn*"))
-        is_authorized = bool(settings.get("steamcmd_authorized", False) or len(sentry_files) > 0)
+        # Prepare Steam credentials and check authorization
+        sync_steam_credentials()
+        is_authorized = has_steam_credentials()
 
         # Authentication in SteamCMD:
         # ONE AND DONE: If already authorized, log in via cached machine credentials (+login username)
@@ -424,12 +424,10 @@ class DownloadQueueManager:
 
             returncode = await process.wait()
 
-            # Always synchronize any new Steam Guard sentry files and mark device authorized if exit code was 0
-            sync_steam_sentry_files()
-            if returncode == 0 and username:
-                sentry_now = list(STEAM_HOME_DIR.glob("ssfn*"))
-                if len(sentry_now) > 0 and not settings.get("steamcmd_authorized"):
-                    save_settings({"steamcmd_authorized": True})
+            # Always synchronize any new Steam Guard sentry files or config.vdf and mark device authorized if exit code was 0
+            sync_steam_credentials()
+            if returncode == 0 and username and not settings.get("steamcmd_authorized"):
+                save_settings({"steamcmd_authorized": True})
 
             if returncode == 0 and not item.error:
                 item.step = "Cleaning structure"

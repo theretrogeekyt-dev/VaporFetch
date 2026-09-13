@@ -55,8 +55,8 @@ DEFAULT_SETTINGS = {
 STEAM_HOME_DIR = DATA_DIR / "steam_home"
 STEAM_HOME_DIR.mkdir(parents=True, exist_ok=True)
 
-def sync_steam_sentry_files():
-    """Syncs any Steam Guard sentry files (ssfn*) between steam directories and persistent storage."""
+def sync_steam_credentials():
+    """Syncs Steam Guard sentry files (ssfn*) and Steam config.vdf / loginusers.vdf between runtime and persistent storage."""
     try:
         STEAM_HOME_DIR.mkdir(parents=True, exist_ok=True)
         search_dirs = [
@@ -65,6 +65,7 @@ def sync_steam_sentry_files():
             Path(os.path.expanduser("~/.steam/steam")),
             Path("/home/steam/.steam"),
             Path("/home/steam/.steam/steam"),
+            Path("/home/steam/Steam"),
             Path("/home/steam"),
             STEAM_HOME_DIR,
         ]
@@ -81,10 +82,15 @@ def sync_steam_sentry_files():
             if sf != dest and not dest.exists():
                 shutil.copy2(sf, dest)
 
-        # Link from STEAM_HOME_DIR into /steamcmd and ~/.steam
+        # Link from STEAM_HOME_DIR into /steamcmd, /home/steam/Steam, and ~/.steam
         for psf in STEAM_HOME_DIR.glob("ssfn*"):
             if psf.is_file():
-                for target_dir in [Path("/steamcmd"), Path("/home/steam/.steam"), Path("/home/steam/.steam/steam")]:
+                for target_dir in [
+                    Path("/steamcmd"), 
+                    Path("/home/steam/.steam"), 
+                    Path("/home/steam/.steam/steam"),
+                    Path("/home/steam/Steam")
+                ]:
                     try:
                         target_dir.mkdir(parents=True, exist_ok=True)
                         link_path = target_dir / psf.name
@@ -92,8 +98,58 @@ def sync_steam_sentry_files():
                             link_path.symlink_to(psf)
                     except Exception:
                         pass
+
+        # Also preserve and sync config.vdf and loginusers.vdf
+        config_sources = [
+            Path("/home/steam/Steam/config"),
+            Path("/home/steam/.steam/steam/config"),
+            Path("/steamcmd/config"),
+        ]
+        persistent_config_dir = STEAM_HOME_DIR / "Steam/config"
+        persistent_config_dir.mkdir(parents=True, exist_ok=True)
+
+        for src_dir in config_sources:
+            if src_dir.exists() and src_dir != persistent_config_dir:
+                for vdf_file in ["config.vdf", "loginusers.vdf"]:
+                    vdf_path = src_dir / vdf_file
+                    dest_path = persistent_config_dir / vdf_file
+                    if vdf_path.exists() and vdf_path.stat().st_size > 50:
+                        if not dest_path.exists() or vdf_path.stat().st_mtime > dest_path.stat().st_mtime:
+                            shutil.copy2(vdf_path, dest_path)
+                    elif dest_path.exists() and dest_path.stat().st_size > 50 and not vdf_path.exists():
+                        shutil.copy2(dest_path, vdf_path)
+
     except Exception as e:
-        print(f"[Config] Error syncing Steam sentry files: {e}")
+        print(f"[Config] Error syncing Steam credentials: {e}")
+
+sync_steam_sentry_files = sync_steam_credentials
+
+def has_steam_credentials() -> bool:
+    """Checks whether SteamCMD has stored persistent credentials/tokens on this machine."""
+    settings = load_settings()
+    if settings.get("steamcmd_authorized", False):
+        return True
+    
+    # Check if any sentry file exists
+    if list(STEAM_HOME_DIR.glob("ssfn*")):
+        return True
+
+    # Check for config.vdf or loginusers.vdf containing account info
+    check_paths = [
+        Path("/home/steam/Steam/config/config.vdf"),
+        Path("/home/steam/Steam/config/loginusers.vdf"),
+        Path("/home/steam/.steam/steam/config/config.vdf"),
+        Path("/home/steam/.steam/steam/config/loginusers.vdf"),
+        Path("/steamcmd/config/config.vdf"),
+        STEAM_HOME_DIR / "Steam/config/config.vdf",
+        STEAM_HOME_DIR / "Steam/config/loginusers.vdf",
+        STEAM_HOME_DIR / ".steam/steam/config/config.vdf",
+        STEAM_HOME_DIR / "steamcmd_config/config.vdf",
+    ]
+    for p in check_paths:
+        if p.exists() and p.is_file() and p.stat().st_size > 50:
+            return True
+    return False
 
 def load_settings() -> dict:
     if SETTINGS_FILE.exists():

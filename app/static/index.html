@@ -344,10 +344,44 @@
           <div class="modal-actions" style="margin-top: 24px; justify-content: space-between;">
             <button type="button" class="btn btn-secondary btn-sm" onclick="skipPasswordSetup()">Skip for now</button>
             <button type="submit" class="btn btn-primary" id="savePasswordBtn">
-              Save Password & Open Library
+              Save Password & Authorize Device
             </button>
           </div>
         </form>
+      </div>
+
+      <!-- Stage 3: SteamCMD One-and-Done Device Authorization -->
+      <div id="qrSteamCmdAuthSection" style="display: none;">
+        <div class="verified-header">
+          <div class="verified-badge-icon" id="authStageIcon">🔑</div>
+          <h2 id="authStageTitle">One-and-Done Device Authorization</h2>
+          <p id="authStageSubtitle">Connecting to Steam to register machine authorization...</p>
+        </div>
+
+        <div class="one-time-info-box" id="authStageInfoBox">
+          <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          <div id="authStageStatusText">
+            <strong>Steam Guard Prompt:</strong> Please check your Steam Mobile app on your phone. When the sign-in notification appears, tap <strong>"Approve"</strong>.
+          </div>
+        </div>
+
+        <div id="authCodeInputGroup" style="display: none; margin-top: 16px; text-align: left;">
+          <label for="steamCmdCodeInput">Steam Guard 2FA Code</label>
+          <div style="display: flex; gap: 8px; margin-top: 6px;">
+            <input type="text" id="steamCmdCodeInput" placeholder="Enter code" maxlength="10" style="flex: 1; text-transform: uppercase; font-family: monospace; font-size: 15px; letter-spacing: 2px;">
+            <button type="button" class="btn btn-primary btn-sm" onclick="submitSteamCmdCode()">Submit</button>
+          </div>
+        </div>
+
+        <div class="qr-status-indicator" style="margin-top: 20px;">
+          <span class="pulse-dot" id="authPulseDot"></span>
+          <span id="authLiveLog">Waiting for Steam confirmation...</span>
+        </div>
+
+        <div class="modal-actions" style="margin-top: 24px; justify-content: space-between;">
+          <button type="button" class="btn btn-secondary btn-sm" id="authCancelBtn" onclick="skipSteamCmdAuth()">Finish Later</button>
+          <button type="button" class="btn btn-primary" id="authSuccessBtn" style="display: none;" onclick="finishSteamCmdAuth()">Open Library</button>
+        </div>
       </div>
 
     </div>
@@ -430,7 +464,25 @@
           Commercial games require a licensed account in SteamCMD. Free dedicated servers/tools download anonymously.
         </small>
 
-        <div class="form-group" style="margin-top: 12px;">
+        <!-- SteamCMD One-and-Done Device Authorization Status Card -->
+        <div class="auth-status-card" id="settingsAuthStatusCard" style="margin-top: 14px; padding: 12px 14px; background: rgba(30, 41, 59, 0.6); border: 1px solid var(--border-color); border-radius: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div>
+              <div style="font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 8px;">
+                <span>Machine Authorization:</span>
+                <span id="cfgAuthStatusBadge" class="badge badge-subtle">Checking...</span>
+              </div>
+              <small class="form-hint" id="cfgAuthStatusHint" style="margin-top: 4px; display: block;">
+                When authorized, SteamCMD downloads your games using saved machine tokens without prompting your phone for approval.
+              </small>
+            </div>
+            <button type="button" id="cfgAuthorizeBtn" class="btn btn-sm btn-outline" onclick="openDeviceAuthorizationModal()">
+              Authorize Machine
+            </button>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-top: 14px;">
           <label for="cfgCustomArgs">Custom SteamCMD Extra Arguments</label>
           <input type="text" id="cfgCustomArgs" placeholder="Optional extra parameters (e.g. +set_steam_guard_code ...)">
         </div>

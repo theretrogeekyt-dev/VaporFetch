@@ -12,8 +12,11 @@ from pydantic import BaseModel, Field
 from app.config import (
     DOWNLOAD_DIR,
     DATA_DIR,
+    STEAM_HOME_DIR,
     STEAMCMD_BIN,
-    load_settings
+    load_settings,
+    save_settings,
+    sync_steam_sentry_files
 )
 
 QUEUE_FILE = DATA_DIR / "queue.json"
@@ -311,8 +314,18 @@ class DownloadQueueManager:
         if platform_type in ("windows", "linux", "macos"):
             cmd.extend([f"+@sSteamCmdForcePlatformType", platform_type])
 
-        # Authentication in SteamCMD
-        if username and password:
+        # Prepare Steam sentry files and check authorization
+        sync_steam_sentry_files()
+        sentry_files = list(STEAM_HOME_DIR.glob("ssfn*"))
+        is_authorized = bool(settings.get("steamcmd_authorized", False) or len(sentry_files) > 0)
+
+        # Authentication in SteamCMD:
+        # ONE AND DONE: If already authorized, log in via cached machine credentials (+login username)
+        # without passing raw password so Steam does NOT trigger mobile 2FA authorization requests!
+        if is_authorized and username:
+            cmd.extend(["+login", username])
+            item.log_tail.append(f"Using saved machine authorization for '{username}' (no mobile prompt)...")
+        elif username and password:
             cmd.extend(["+login", username, password])
         elif username:
             cmd.extend(["+login", username])
@@ -395,7 +408,8 @@ class DownloadQueueManager:
                 elif "No subscription" in line:
                     item.error = "Steam account does not own this game (No subscription)."
                 elif "Enter password for user" in line or "password:" in line:
-                    item.error = "Steam password required for commercial games. Please enter your password in Settings."
+                    item.error = "Steam authorization required. Please authorize this device in Settings or One-Time Setup."
+                    save_settings({"steamcmd_authorized": False})
 
                 await self.broadcast("item_log", {
                     "id": item.id,
@@ -409,6 +423,13 @@ class DownloadQueueManager:
                 })
 
             returncode = await process.wait()
+
+            # Always synchronize any new Steam Guard sentry files and mark device authorized if exit code was 0
+            sync_steam_sentry_files()
+            if returncode == 0 and username:
+                sentry_now = list(STEAM_HOME_DIR.glob("ssfn*"))
+                if len(sentry_now) > 0 and not settings.get("steamcmd_authorized"):
+                    save_settings({"steamcmd_authorized": True})
 
             if returncode == 0 and not item.error:
                 item.step = "Cleaning structure"

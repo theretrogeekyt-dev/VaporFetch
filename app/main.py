@@ -20,6 +20,7 @@ from app.config import (
 from app.auth import auth_manager
 from app.steam_api import steam_api_client
 from app.queue_manager import queue_manager
+from app.steamcmd_auth import steamcmd_auth_manager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -43,6 +44,13 @@ class QueueAddRequest(BaseModel):
     games: List[Dict[str, Any]]
     require_goldberg: Optional[bool] = False
 
+class SteamCmdAuthRequest(BaseModel):
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+class SteamCmdCodeRequest(BaseModel):
+    code: str
+
 class SettingsUpdateRequest(BaseModel):
     steam_api_key: Optional[str] = None
     force_platform: Optional[str] = None
@@ -50,6 +58,7 @@ class SettingsUpdateRequest(BaseModel):
     enable_goldberg: Optional[bool] = None
     steamcmd_username: Optional[str] = None
     steamcmd_password: Optional[str] = None
+    steamcmd_authorized: Optional[bool] = None
     custom_steamcmd_args: Optional[str] = None
 
 
@@ -99,10 +108,14 @@ async def get_session():
     session = auth_manager.get_session()
     settings = load_settings()
     has_password = bool(settings.get("steamcmd_password"))
+    auth_status = steamcmd_auth_manager.get_status()
+    steamcmd_authorized = auth_status["authorized"]
+
     if not session:
         return {
             "authenticated": False,
             "has_password": has_password,
+            "steamcmd_authorized": steamcmd_authorized,
             "setup_complete": False
         }
     
@@ -121,13 +134,48 @@ async def get_session():
         "authenticated": True,
         "session": session,
         "has_password": has_password,
-        "setup_complete": bool(session.get("authenticated") and has_password)
+        "steamcmd_authorized": steamcmd_authorized,
+        "setup_complete": bool(session.get("authenticated") and (has_password or steamcmd_authorized))
     }
 
 
 @app.post("/api/auth/logout")
 async def logout():
     auth_manager.logout()
+    return {"success": True}
+
+
+# SteamCMD One-and-Done Device Authorization Endpoints
+@app.get("/api/auth/steamcmd/status")
+async def get_steamcmd_auth_status():
+    return steamcmd_auth_manager.get_status()
+
+
+@app.post("/api/auth/steamcmd/authorize")
+async def start_steamcmd_auth(req: SteamCmdAuthRequest):
+    try:
+        status = await steamcmd_auth_manager.start_authorization(username=req.username, password=req.password)
+        return status
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start SteamCMD authorization: {e}")
+
+
+@app.post("/api/auth/steamcmd/code")
+async def submit_steamcmd_code(req: SteamCmdCodeRequest):
+    try:
+        status = await steamcmd_auth_manager.send_code(req.code)
+        return status
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to send code to SteamCMD: {e}")
+
+
+@app.post("/api/auth/steamcmd/cancel")
+async def cancel_steamcmd_auth():
+    steamcmd_auth_manager.cancel()
     return {"success": True}
 
 
@@ -308,6 +356,8 @@ async def update_settings(req: SettingsUpdateRequest):
         updates["steamcmd_username"] = req.steamcmd_username.strip()
     if req.steamcmd_password is not None and req.steamcmd_password != "******":
         updates["steamcmd_password"] = req.steamcmd_password
+    if req.steamcmd_authorized is not None:
+        updates["steamcmd_authorized"] = req.steamcmd_authorized
     if req.custom_steamcmd_args is not None:
         updates["custom_steamcmd_args"] = req.custom_steamcmd_args.strip()
 

@@ -1,5 +1,7 @@
 import os
+import re
 import json
+import time
 import shutil
 from pathlib import Path
 
@@ -116,6 +118,8 @@ def sync_steam_credentials():
                     if vdf_path.exists() and vdf_path.stat().st_size > 50:
                         if not dest_path.exists() or vdf_path.stat().st_mtime > dest_path.stat().st_mtime:
                             shutil.copy2(vdf_path, dest_path)
+                        elif dest_path.exists() and dest_path.stat().st_mtime > vdf_path.stat().st_mtime:
+                            shutil.copy2(dest_path, vdf_path)
                     elif dest_path.exists() and dest_path.stat().st_size > 50 and not vdf_path.exists():
                         shutil.copy2(dest_path, vdf_path)
 
@@ -148,8 +152,109 @@ def has_steam_credentials() -> bool:
     ]
     for p in check_paths:
         if p.exists() and p.is_file() and p.stat().st_size > 50:
-            return True
+            try:
+                content = p.read_text(encoding="utf-8", errors="replace")
+                if any(k in content for k in ("Accounts", "ConnectCache", "AutoLoginUser", "RememberPassword")):
+                    return True
+            except Exception:
+                return True
     return False
+
+def configure_steam_autologin(username: str, steamid: str = "") -> None:
+    """
+    Configures config.vdf and loginusers.vdf across all Steam directories
+    to ensure AutoLoginUser is set to `username` and RememberPassword is set to '1'.
+    This guarantees SteamCMD uses the saved session without prompting for 2FA or passwords.
+    """
+    if not username:
+        return
+
+    clean_user = username.strip()
+    target_dirs = [
+        Path("/home/steam/Steam/config"),
+        Path("/home/steam/.steam/steam/config"),
+        Path("/home/steam/.local/share/Steam/config"),
+        Path("/steamcmd/config"),
+        STEAM_HOME_DIR / "Steam/config",
+        STEAM_HOME_DIR / ".steam/steam/config",
+        STEAM_HOME_DIR / "steamcmd_config",
+    ]
+
+    for cdir in target_dirs:
+        try:
+            cdir.mkdir(parents=True, exist_ok=True)
+            cfg_file = cdir / "config.vdf"
+            if cfg_file.exists() and cfg_file.stat().st_size > 20:
+                try:
+                    text = cfg_file.read_text(encoding="utf-8", errors="replace")
+                    # Update or insert AutoLoginUser
+                    if re.search(r'"AutoLoginUser"\s+"[^"]*"', text, flags=re.IGNORECASE):
+                        text = re.sub(r'("AutoLoginUser"\s+)"[^"]*"', rf'\g<1>"{clean_user}"', text, flags=re.IGNORECASE)
+                    else:
+                        steam_match = re.search(r'("Steam"\s*\{)', text, flags=re.IGNORECASE)
+                        if steam_match:
+                            text = re.sub(r'("Steam"\s*\{)', rf'\g<1>\n\t\t\t\t"AutoLoginUser"\t\t"{clean_user}"', text, count=1, flags=re.IGNORECASE)
+
+                    # Update or insert RememberPassword
+                    if re.search(r'"RememberPassword"\s+"[^"]*"', text, flags=re.IGNORECASE):
+                        text = re.sub(r'("RememberPassword"\s+)"[^"]*"', r'\g<1>"1"', text, flags=re.IGNORECASE)
+                    else:
+                        steam_match = re.search(r'("Steam"\s*\{)', text, flags=re.IGNORECASE)
+                        if steam_match:
+                            text = re.sub(r'("Steam"\s*\{)', r'\g<1>\n\t\t\t\t"RememberPassword"\t\t"1"', text, count=1, flags=re.IGNORECASE)
+
+                    cfg_file.write_text(text, encoding="utf-8")
+                except Exception as ex:
+                    print(f"[Config] Error updating {cfg_file}: {ex}")
+            elif not cfg_file.exists():
+                minimal_cfg = (
+                    '"InstallConfigStore"\n'
+                    '{\n'
+                    '\t"Software"\n'
+                    '\t{\n'
+                    '\t\t"Valve"\n'
+                    '\t\t{\n'
+                    '\t\t\t"Steam"\n'
+                    '\t\t\t{\n'
+                    f'\t\t\t\t"AutoLoginUser"\t\t"{clean_user}"\n'
+                    '\t\t\t\t"RememberPassword"\t\t"1"\n'
+                    '\t\t\t}\n'
+                    '\t\t}\n'
+                    '\t}\n'
+                    '}\n'
+                )
+                cfg_file.write_text(minimal_cfg, encoding="utf-8")
+
+            # Also check loginusers.vdf
+            users_file = cdir / "loginusers.vdf"
+            if users_file.exists() and users_file.stat().st_size > 20:
+                try:
+                    text = users_file.read_text(encoding="utf-8", errors="replace")
+                    text = re.sub(r'("RememberPassword"\s+)"[^"]*"', r'\g<1>"1"', text, flags=re.IGNORECASE)
+                    text = re.sub(r'("MostRecent"\s+)"[^"]*"', r'\g<1>"1"', text, flags=re.IGNORECASE)
+                    users_file.write_text(text, encoding="utf-8")
+                except Exception as ex:
+                    print(f"[Config] Error updating {users_file}: {ex}")
+            elif steamid and not users_file.exists():
+                minimal_users = (
+                    '"users"\n'
+                    '{\n'
+                    f'\t"{steamid}"\n'
+                    '\t{\n'
+                    f'\t\t"AccountName"\t\t"{clean_user}"\n'
+                    f'\t\t"PersonaName"\t\t"{clean_user}"\n'
+                    '\t\t"RememberPassword"\t\t"1"\n'
+                    '\t\t"MostRecent"\t\t"1"\n'
+                    '\t\t"WantsOfflineMode"\t\t"0"\n'
+                    '\t\t"SkipOfflineModeWarning"\t\t"0"\n'
+                    '\t}\n'
+                    '}\n'
+                )
+                users_file.write_text(minimal_users, encoding="utf-8")
+        except Exception as e:
+            print(f"[Config] Error configuring autologin in {cdir}: {e}")
+
+    sync_steam_credentials()
 
 def load_settings() -> dict:
     if SETTINGS_FILE.exists():

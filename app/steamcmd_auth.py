@@ -9,7 +9,8 @@ from app.config import (
     load_settings, 
     save_settings, 
     sync_steam_credentials,
-    has_steam_credentials
+    has_steam_credentials,
+    configure_steam_autologin
 )
 
 class SteamCmdAuthManager:
@@ -125,7 +126,8 @@ class SteamCmdAuthManager:
             if returncode == 0 or self.state == "success":
                 self.state = "success"
                 self.status_message = "Device authorized successfully! One and done — future downloads will run without prompts."
-                # Sync new sentry files and config.vdf to persistent volume
+                # Configure autologin and sync credentials to persistent volume
+                configure_steam_autologin(username)
                 sync_steam_credentials()
                 save_settings({
                     "steamcmd_authorized": True,

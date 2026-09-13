@@ -403,14 +403,14 @@ async function pollSteamCmdAuthStatus() {
       if (codeGroup) codeGroup.style.display = "none";
     }
 
-    if (data.state === "success" || (data.authorized && data.has_sentry)) {
+    if (data.state === "success" || data.authorized) {
       clearInterval(steamCmdAuthPollTimer);
       steamCmdAuthPollTimer = null;
       if (iconEl) iconEl.textContent = "✅";
       if (titleEl) titleEl.textContent = "Machine Authorized!";
       if (subtitleEl) subtitleEl.textContent = "One and done! No authorization requests will be sent during downloads.";
       if (infoText) {
-        infoText.innerHTML = `<strong>Success:</strong> SteamCMD has recorded this machine's authorization and saved persistent sentry tokens to your NAS. Future game downloads will start automatically without asking your phone.`;
+        infoText.innerHTML = `<strong>Success:</strong> SteamCMD has recorded this machine's authorization and saved persistent session credentials to your NAS. Future game downloads will start automatically without asking your phone.`;
       }
       if (pulseDot) pulseDot.style.display = "none";
       if (successBtn) successBtn.style.display = "inline-block";
@@ -887,7 +887,10 @@ function renderHistoryList(items) {
               ${escapeHtml(item.name)}
               ${item.require_goldberg ? '<span class="badge badge-goldberg" style="margin-left: 6px; font-size: 10px;">Goldberg Required</span>' : ''}
             </div>
-            <div class="queue-item-sub">${item.step} ${item.error ? `&bull; <span style="color: var(--accent-red);">${escapeHtml(item.error)}</span>` : ''}</div>
+            <div class="queue-item-sub">
+              ${item.step} ${item.error ? `&bull; <span style="color: var(--accent-red);">${escapeHtml(item.error)}</span>` : ''}
+              ${item.error && item.error.includes("authorization required") ? `<button class="btn btn-xs btn-outline" style="margin-left: 6px; font-size: 10px; padding: 2px 6px; border-color: var(--accent-yellow); color: var(--accent-yellow);" onclick="openSettingsModal()">Authorize Machine</button>` : ''}
+            </div>
           </div>
         </div>
         <div style="display:flex; gap: 6px;">

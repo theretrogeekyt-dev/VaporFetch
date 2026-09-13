@@ -17,8 +17,10 @@ from app.config import (
     load_settings,
     save_settings,
     sync_steam_credentials,
-    has_steam_credentials
+    has_steam_credentials,
+    configure_steam_autologin
 )
+from app.auth import auth_manager
 
 QUEUE_FILE = DATA_DIR / "queue.json"
 
@@ -305,9 +307,14 @@ class DownloadQueueManager:
         # Construct SteamCMD command
         platform_type = settings.get("force_platform", "windows")
         username = settings.get("steamcmd_username", "").strip()
-        password = settings.get("steamcmd_password", "").strip()
         validate = settings.get("validate_downloads", True)
         custom_args = settings.get("custom_steamcmd_args", "").strip()
+
+        # Fallback to session account name if not explicitly set in settings
+        session = auth_manager.get_session()
+        if not username and session:
+            username = session.get("account_name", "").strip()
+        steamid = session.get("steamid", "") if session else ""
 
         cmd = ["/bin/bash", STEAMCMD_BIN]
         cmd.extend(["+force_install_dir", str(install_path)])
@@ -315,20 +322,17 @@ class DownloadQueueManager:
         if platform_type in ("windows", "linux", "macos"):
             cmd.extend([f"+@sSteamCmdForcePlatformType", platform_type])
 
-        # Prepare Steam credentials and check authorization
+        # Prepare Steam credentials and configure autologin
+        if username:
+            configure_steam_autologin(username, steamid)
         sync_steam_credentials()
-        is_authorized = has_steam_credentials()
 
-        # Authentication in SteamCMD:
-        # ONE AND DONE: If already authorized, log in via cached machine credentials (+login username)
-        # without passing raw password so Steam does NOT trigger mobile 2FA authorization requests!
-        if is_authorized and username:
+        # Routine downloads MUST NEVER pass the password on the command line!
+        # Passing raw password forces Steam to trigger a 2FA mobile approval request every time.
+        # Instead, SteamCMD authenticates silently using the machine session stored in config.vdf.
+        if username:
             cmd.extend(["+login", username])
-            item.log_tail.append(f"Using saved machine authorization for '{username}' (no mobile prompt)...")
-        elif username and password:
-            cmd.extend(["+login", username, password])
-        elif username:
-            cmd.extend(["+login", username])
+            item.log_tail.append(f"Logging in as '{username}' using saved machine session (no mobile prompt)...")
         else:
             cmd.extend(["+login", "anonymous"])
 
@@ -343,7 +347,7 @@ class DownloadQueueManager:
 
         cmd.append("+quit")
 
-        item.log_tail.append(f"Executing: {' '.join([c if c != password else '******' for c in cmd])}")
+        item.log_tail.append(f"Executing: {' '.join(cmd)}")
         await self.broadcast("item_update", item.model_dump())
 
         last_bytes = 0
@@ -407,8 +411,14 @@ class DownloadQueueManager:
                     item.error = line
                 elif "No subscription" in line:
                     item.error = "Steam account does not own this game (No subscription)."
-                elif "Enter password for user" in line or "password:" in line:
-                    item.error = "Steam authorization required. Please authorize this device in Settings or One-Time Setup."
+                elif (
+                    "Enter password for user" in line 
+                    or "password:" in line 
+                    or "FAILED (Account Logon Denied)" in line
+                    or "FAILED (Invalid Password)" in line
+                    or "FAILED (Rate Limit Exceeded)" in line
+                ):
+                    item.error = "Steam authorization required. Please authorize this device once in Settings."
                     save_settings({"steamcmd_authorized": False})
 
                 await self.broadcast("item_log", {

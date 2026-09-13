@@ -114,25 +114,23 @@ async def post_process_game_directory(
                         shutil.rmtree(dest_dir, ignore_errors=True)
                     src_dir.rename(dest_dir)
 
-    # Step 3: Check if Goldberg offline emulator is enabled in settings or required for this batch
+    # Step 3: Check if Goldberg offline emulator is enabled in settings or requested for this batch
     settings = load_settings()
     should_apply_goldberg = require_goldberg or settings.get("enable_goldberg", False)
     if should_apply_goldberg and appid > 0:
         from app.goldberg import goldberg_manager
-        await goldberg_manager.ensure_binaries()
-        status = goldberg_manager.check_status(install_path)
-        if status.get("compatible"):
-            account_name = settings.get("steamcmd_username") or "Player"
-            res = goldberg_manager.apply(install_path, appid=appid, account_name=account_name)
-            req_note = " (Required for batch)" if require_goldberg else ""
-            log(f"Applied Goldberg offline wrapper{req_note} ({res['patched_count']} DLLs patched). Original saved to .orig.")
-        else:
-            if require_goldberg:
-                raise RuntimeError(
-                    f"Goldberg patch was required for this batch, but '{install_path.name}' does not contain steam_api.dll or steam_api64.dll."
-                )
+        try:
+            await goldberg_manager.ensure_binaries()
+            status = goldberg_manager.check_status(install_path)
+            if status.get("compatible"):
+                account_name = settings.get("steamcmd_username") or "Player"
+                res = goldberg_manager.apply(install_path, appid=appid, account_name=account_name)
+                req_note = " (Batch auto-applied)" if require_goldberg else ""
+                log(f"Applied Goldberg offline wrapper{req_note} ({res['patched_count']} DLLs patched). Original saved to .orig.")
             else:
-                log("Game does not use standard steam_api.dll; Goldberg wrapper not applied.")
+                log(f"Game '{install_path.name}' does not use steam_api.dll or steam_api64.dll (DRM-free or does not require wrapper); automatically skipped Goldberg patch.")
+        except Exception as ex:
+            log(f"Warning: Could not apply Goldberg patch ({ex}); preserving authentic game files.")
 
 
 class QueueItem(BaseModel):

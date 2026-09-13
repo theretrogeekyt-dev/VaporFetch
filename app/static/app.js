@@ -750,7 +750,7 @@ async function queueSelectedGames() {
     }
 
     const data = await res.json();
-    showToast(`Added ${data.added_count} game(s) to download queue!${requireGoldberg ? " (Goldberg Required)" : ""}`);
+    showToast(`Added ${data.added_count} game(s) to download queue!${requireGoldberg ? " (Auto-Apply Goldberg)" : ""}`);
     
     // Clear selection & reset toggle
     deselectAll();
@@ -863,7 +863,7 @@ function renderPendingList(items) {
         <div>
           <div class="queue-item-name">
             ${escapeHtml(item.name)}
-            ${item.require_goldberg ? '<span class="badge badge-goldberg" style="margin-left: 6px; font-size: 10px;">Goldberg Required</span>' : ''}
+            ${item.require_goldberg ? '<span class="badge badge-goldberg" style="margin-left: 6px; font-size: 10px;">Goldberg Auto</span>' : ''}
           </div>
           <div class="queue-item-sub">AppID: ${item.appid} &bull; ${item.step}</div>
         </div>
@@ -894,7 +894,7 @@ function renderHistoryList(items) {
           <div>
             <div class="queue-item-name">
               ${escapeHtml(item.name)}
-              ${item.require_goldberg ? '<span class="badge badge-goldberg" style="margin-left: 6px; font-size: 10px;">Goldberg Required</span>' : ''}
+              ${item.require_goldberg ? '<span class="badge badge-goldberg" style="margin-left: 6px; font-size: 10px;">Goldberg Auto</span>' : ''}
             </div>
             <div class="queue-item-sub">
               ${item.step} ${item.error ? `&bull; <span style="color: var(--accent-red);">${escapeHtml(item.error)}</span>` : ''}

@@ -70,6 +70,12 @@ async def serve_index():
     return HTMLResponse("<h1>VaporFetch is initializing...</h1>")
 
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    from app.steam_session import steam_session
+    await steam_session.terminate_session()
+
+
 # ---------------- Auth Endpoints ---------------- #
 
 @app.post("/api/auth/qr/begin")

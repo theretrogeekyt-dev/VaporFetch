@@ -21,6 +21,7 @@ from app.config import (
     configure_steam_autologin
 )
 from app.auth import auth_manager
+from app.steam_session import steam_session
 
 QUEUE_FILE = DATA_DIR / "queue.json"
 
@@ -237,9 +238,9 @@ class DownloadQueueManager:
         """Removes or cancels a queue item."""
         for idx, item in enumerate(self.items):
             if item.id == item_id:
-                if item.status == "running" and self.active_process:
+                if item.status == "running":
                     try:
-                        self.active_process.terminate()
+                        asyncio.create_task(steam_session.terminate_session())
                     except Exception:
                         pass
                     item.status = "cancelled"
@@ -298,15 +299,15 @@ class DownloadQueueManager:
         item.status = "running"
         item.started_at = time.time()
         item.install_dir = str(install_path)
-        item.step = "Initializing SteamCMD"
+        item.step = "Preparing Download"
         item.log_tail.append(f"Starting download for {item.name} (AppID: {item.appid})...")
         item.log_tail.append(f"Destination: {install_path}")
         self._save_queue()
         await self.broadcast("item_update", item.model_dump())
 
-        # Construct SteamCMD command
         platform_type = settings.get("force_platform", "windows")
         username = settings.get("steamcmd_username", "").strip()
+        password = settings.get("steamcmd_password", "").strip()
         validate = settings.get("validate_downloads", True)
         custom_args = settings.get("custom_steamcmd_args", "").strip()
 
@@ -314,179 +315,85 @@ class DownloadQueueManager:
         session = auth_manager.get_session()
         if not username and session:
             username = session.get("account_name", "").strip()
-        steamid = session.get("steamid", "") if session else ""
-
-        cmd = ["/bin/bash", STEAMCMD_BIN]
-        cmd.extend(["+force_install_dir", str(install_path)])
-
-        if platform_type in ("windows", "linux", "macos"):
-            cmd.extend([f"+@sSteamCmdForcePlatformType", platform_type])
-
-        # Prepare Steam credentials and configure autologin
-        if username:
-            configure_steam_autologin(username, steamid)
-        sync_steam_credentials()
-
-        # Routine downloads MUST NEVER pass the password on the command line!
-        # Passing raw password forces Steam to trigger a 2FA mobile approval request every time.
-        # Instead, SteamCMD authenticates silently using the machine session stored in config.vdf.
-        if username:
-            cmd.extend(["+login", username])
-            item.log_tail.append(f"Logging in as '{username}' using saved machine session (no mobile prompt)...")
-        else:
-            cmd.extend(["+login", "anonymous"])
-
-        # App update command
-        app_update_cmd = f"+app_update {item.appid}"
-        if validate:
-            app_update_cmd += " validate"
-        cmd.append(app_update_cmd)
-
-        if custom_args:
-            cmd.extend(custom_args.split())
-
-        cmd.append("+quit")
-
-        item.log_tail.append(f"Executing: {' '.join(cmd)}")
-        await self.broadcast("item_update", item.model_dump())
 
         last_bytes = 0
         last_time = time.time()
 
-        proc_env = os.environ.copy()
-        proc_env["HOME"] = "/home/steam"
+        def on_log(line: str):
+            item.log_tail.append(line)
+            if len(item.log_tail) > 80:
+                item.log_tail.pop(0)
+            asyncio.create_task(self.broadcast("item_log", {
+                "id": item.id,
+                "line": line,
+                "progress": item.progress,
+                "step": item.step,
+                "speed_bps": item.speed_bps,
+                "eta_seconds": item.eta_seconds,
+                "current_bytes": item.current_bytes,
+                "total_bytes": item.total_bytes,
+            }))
+
+        def on_progress(pct: float, cur_b: int, tot_b: int, step_name: str):
+            nonlocal last_bytes, last_time
+            now = time.time()
+            dt = now - last_time
+            if dt >= 0.8:
+                if cur_b >= last_bytes and dt > 0:
+                    item.speed_bps = (cur_b - last_bytes) / dt
+                if item.speed_bps > 0 and tot_b > cur_b:
+                    item.eta_seconds = int((tot_b - cur_b) / item.speed_bps)
+                else:
+                    item.eta_seconds = 0
+                last_bytes = cur_b
+                last_time = now
+
+            item.progress = pct
+            item.current_bytes = cur_b
+            item.total_bytes = tot_b
+            item.step = step_name
+            asyncio.create_task(self.broadcast("item_update", item.model_dump()))
 
         try:
-            # Execute SteamCMD subprocess with explicit HOME and working dir
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                env=proc_env,
-                cwd="/home/steam" if Path("/home/steam").exists() else None
+            item.step = "Connecting SteamCMD"
+            await self.broadcast("item_update", item.model_dump())
+
+            await steam_session.run_download_job(
+                appid=item.appid,
+                install_path=install_path,
+                platform_type=platform_type,
+                validate=validate,
+                custom_args=custom_args,
+                username=username,
+                password=password,
+                log_callback=on_log,
+                progress_callback=on_progress
             )
-            self.active_process = process
 
-            while True:
-                line_bytes = await process.stdout.readline()
-                if not line_bytes:
-                    break
-                line = line_bytes.decode("utf-8", errors="replace").rstrip()
-                if not line:
-                    continue
-
-                # Add to recent log tail (keep last 80 lines)
-                item.log_tail.append(line)
-                if len(item.log_tail) > 80:
-                    item.log_tail.pop(0)
-
-                # Parse progress
-                match = PROGRESS_REGEX.search(line)
-                if match:
-                    state_code, state_name, pct_str, cur_b_str, tot_b_str = match.groups()
-                    pct = float(pct_str)
-                    cur_b = int(cur_b_str)
-                    tot_b = int(tot_b_str)
-
-                    now = time.time()
-                    dt = now - last_time
-                    if dt >= 0.8:
-                        if cur_b >= last_bytes and dt > 0:
-                            item.speed_bps = (cur_b - last_bytes) / dt
-                        if item.speed_bps > 0 and tot_b > cur_b:
-                            item.eta_seconds = int((tot_b - cur_b) / item.speed_bps)
-                        else:
-                            item.eta_seconds = 0
-                        last_bytes = cur_b
-                        last_time = now
-
-                    item.progress = pct
-                    item.current_bytes = cur_b
-                    item.total_bytes = tot_b
-                    item.step = state_name.capitalize()
-                elif "Success! App" in line:
-                    item.step = "Success"
-                    item.progress = 100.0
-                elif "ERROR!" in line or "Failed to install" in line:
-                    item.error = line
-                elif "No subscription" in line:
-                    item.error = "Steam account does not own this game (No subscription)."
-                elif (
-                    "Enter password for user" in line 
-                    or "password:" in line 
-                    or "FAILED (Account Logon Denied)" in line
-                    or "FAILED (Invalid Password)" in line
-                    or "FAILED (Rate Limit Exceeded)" in line
-                ):
-                    item.error = "Steam authorization required. Please authorize this device once in Settings."
-                    save_settings({"steamcmd_authorized": False})
-
-                await self.broadcast("item_log", {
-                    "id": item.id,
-                    "line": line,
-                    "progress": item.progress,
-                    "step": item.step,
-                    "speed_bps": item.speed_bps,
-                    "eta_seconds": item.eta_seconds,
-                    "current_bytes": item.current_bytes,
-                    "total_bytes": item.total_bytes,
-                })
-
-            returncode = await process.wait()
-
-            # Always synchronize any new Steam Guard sentry files or config.vdf and mark device authorized if exit code was 0
-            sync_steam_credentials()
-            if returncode == 0 and username and not settings.get("steamcmd_authorized"):
-                save_settings({"steamcmd_authorized": True})
-
-            if returncode == 0 and not item.error:
-                item.step = "Cleaning structure"
-                try:
-                    await post_process_game_directory(
-                        install_path, 
-                        appid=item.appid, 
-                        log_tail=item.log_tail, 
-                        require_goldberg=item.require_goldberg
-                    )
-                    item.status = "completed"
-                    item.progress = 100.0
-                    item.step = "Completed"
-                    item.completed_at = time.time()
-                    item.log_tail.append(f"App {item.appid} ({item.name}) downloaded and structured successfully in {install_path}.")
-                except Exception as ppe:
-                    item.status = "failed"
-                    item.error = str(ppe)
-                    item.step = "Failed (Goldberg Required)" if item.require_goldberg and "Goldberg" in str(ppe) else "Failed (Post-process)"
-                    item.log_tail.append(f"Post-processing failed: {ppe}")
-            elif item.status == "cancelled":
-                item.log_tail.append("Process cancelled.")
-            else:
-                item.status = "failed"
-                # If error wasn't caught by specific pattern, find the last meaningful log message
-                if not item.error:
-                    candidate_lines = [
-                        l for l in item.log_tail 
-                        if not l.startswith("Executing:") and not l.startswith("Starting download") and not l.startswith("Destination:")
-                    ]
-                    last_msg = candidate_lines[-1] if candidate_lines else f"exit code {returncode}"
-                    item.error = f"SteamCMD failed ({last_msg})"
-
-                item.step = "Failed"
-                item.log_tail.append(f"Download failed: {item.error}")
+            # Post-process
+            item.step = "Cleaning structure"
+            await post_process_game_directory(
+                install_path, 
+                appid=item.appid, 
+                log_tail=item.log_tail, 
+                require_goldberg=item.require_goldberg
+            )
+            item.status = "completed"
+            item.progress = 100.0
+            item.step = "Completed"
+            item.completed_at = time.time()
+            item.log_tail.append(f"App {item.appid} ({item.name}) downloaded and structured successfully in {install_path}.")
 
         except asyncio.CancelledError:
             item.status = "cancelled"
             item.step = "Cancelled"
-            if self.active_process:
-                try:
-                    self.active_process.kill()
-                except Exception:
-                    pass
+            item.log_tail.append("Download cancelled by user.")
+            await steam_session.terminate_session()
         except Exception as ex:
             item.status = "failed"
             item.error = str(ex)
             item.step = "Failed"
-            item.log_tail.append(f"Unexpected error: {ex}")
+            item.log_tail.append(f"Download failed: {ex}")
         finally:
             self.active_process = None
             self._save_queue()

@@ -21,10 +21,11 @@ PROGRESS_REGEX = re.compile(
 
 class SteamCmdSessionWorker:
     """
-    Manages a long-running, persistent SteamCMD process.
-    Keeping SteamCMD running in interactive mode avoids repetitive logins,
-    which is the root cause of Steam Mobile Authenticator push notifications
-    on every individual game download.
+    Manages a long-running, persistent interactive SteamCMD process.
+    By launching SteamCMD strictly in interactive console mode (WITHOUT any + CLI arguments)
+    and piping login/download commands directly to stdin, SteamCMD stays alive at the Steam>
+    prompt indefinitely. This ensures mobile 2FA approval occurs exactly ONCE per container
+    lifecycle, and all queued/batch downloads run without prompting your phone.
     """
     def __init__(self):
         self.process: Optional[asyncio.subprocess.Process] = None
@@ -58,7 +59,9 @@ class SteamCmdSessionWorker:
     async def _stdout_reader(self):
         """Reads stdout from the SteamCMD subprocess line by line and queues it."""
         try:
-            while self.is_alive():
+            while True:
+                if not self.process or not self.process.stdout:
+                    break
                 line_bytes = await self.process.stdout.readline()
                 if not line_bytes:
                     break
@@ -67,7 +70,7 @@ class SteamCmdSessionWorker:
                     continue
 
                 self.log_history.append(line)
-                if len(self.log_history) > 120:
+                if len(self.log_history) > 150:
                     self.log_history.pop(0)
 
                 await self.line_queue.put(line)
@@ -92,7 +95,7 @@ class SteamCmdSessionWorker:
             if not clean_user:
                 raise ValueError("Steam username is required to start SteamCMD session.")
 
-            # If already alive, authenticated, and matching user, return immediately
+            # If already alive, authenticated, and matching user, return immediately!
             if self.is_ready() and self.current_user.lower() == clean_user.lower():
                 if log_callback:
                     log_callback(f"Using active persistent SteamCMD session for '{clean_user}' (no phone prompt).")
@@ -125,12 +128,10 @@ class SteamCmdSessionWorker:
             proc_env = os.environ.copy()
             proc_env["HOME"] = "/home/steam"
 
-            # Launch SteamCMD in interactive daemon mode with +login
+            # CRITICAL: Launch SteamCMD strictly in interactive console mode with NO "+" CLI arguments!
+            # When SteamCMD receives "+" arguments on the command line, it runs in batch mode and terminates
+            # after executing them. Without "+" arguments, it enters interactive mode and stays at Steam> forever.
             cmd = ["/bin/bash", STEAMCMD_BIN]
-            if clean_pass:
-                cmd.extend(["+login", clean_user, clean_pass])
-            else:
-                cmd.extend(["+login", clean_user])
 
             try:
                 self.process = await asyncio.create_subprocess_exec(
@@ -149,11 +150,51 @@ class SteamCmdSessionWorker:
                     log_callback(self.status_message)
                 raise RuntimeError(self.status_message)
 
-            # Monitor startup / login output
-            login_timeout = 120.0  # Allow up to 2 minutes for user to tap Approve on mobile
-            start_time = time.time()
+            # 1. Wait for SteamCMD interactive shell to initialize
+            ready = False
+            start_init = time.time()
+            while time.time() - start_init < 45.0:
+                try:
+                    line = await asyncio.wait_for(self.line_queue.get(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    if not self.is_alive():
+                        break
+                    continue
 
-            while time.time() - start_time < login_timeout:
+                if line is None:
+                    break
+
+                if log_callback:
+                    log_callback(line)
+
+                lower_line = line.lower()
+                if "loading steam api... ok" in lower_line or "type 'quit' to exit" in lower_line or "steam>" in lower_line:
+                    ready = True
+                    break
+
+            if not ready or not self.is_alive() or not self.process or not self.process.stdin:
+                self.state = "error"
+                self.status_message = "SteamCMD failed to initialize interactive console."
+                await self.terminate_session()
+                raise RuntimeError(self.status_message)
+
+            # 2. Send login command directly to interactive stdin
+            if clean_pass:
+                login_line = f"login {clean_user} {clean_pass}\n"
+            else:
+                login_line = f"login {clean_user}\n"
+
+            if log_callback:
+                log_callback(f">> Authenticating '{clean_user}' in persistent session...")
+
+            self.process.stdin.write(login_line.encode("utf-8"))
+            await self.process.stdin.drain()
+
+            # 3. Monitor login output from line queue
+            login_timeout = 120.0  # Allow up to 2 minutes for user to tap Approve on phone
+            start_login = time.time()
+
+            while time.time() - start_login < login_timeout:
                 try:
                     line = await asyncio.wait_for(self.line_queue.get(), timeout=15.0)
                 except asyncio.TimeoutError:
@@ -161,7 +202,7 @@ class SteamCmdSessionWorker:
                         break
                     continue
 
-                if line is None:  # Process exited
+                if line is None:
                     break
 
                 if log_callback:
@@ -218,7 +259,6 @@ class SteamCmdSessionWorker:
                     await self.terminate_session()
                     raise RuntimeError(self.status_message)
 
-            # Check if logged in before timeout
             if self.is_logged_in:
                 return True
 
@@ -388,4 +428,3 @@ class SteamCmdSessionWorker:
 
 # Singleton instance shared across the application
 steam_session = SteamCmdSessionWorker()
-

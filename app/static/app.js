@@ -16,6 +16,15 @@ document.addEventListener("DOMContentLoaded", () => {
   checkForUpdatesOnStartup();
   // Poll system status periodically (every 30 seconds)
   setInterval(fetchSystemStatus, 30000);
+
+  // Global Escape key listener to close open modals
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      closeSettingsModal();
+      closeQrModal();
+      closeUpdateModal();
+    }
+  });
 });
 
 // ---------------- Navigation & Tabs ---------------- //

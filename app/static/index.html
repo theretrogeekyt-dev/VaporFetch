@@ -273,7 +273,7 @@
   </aside>
 
   <!-- Steam Guard QR Code Modal & Password Prompt -->
-  <div id="qrModal" class="modal-backdrop" style="display: none;">
+  <div id="qrModal" class="modal-backdrop" style="display: none;" onclick="if(event.target === this) closeQrModal()">
     <div class="modal-card qr-card">
       <button class="modal-close" onclick="closeQrModal()">&times;</button>
       
@@ -388,8 +388,8 @@
   </div>
 
   <!-- Settings & Configuration Modal -->
-  <div id="settingsModal" class="modal-backdrop" style="display: none;">
-    <div class="modal-card">
+  <div id="settingsModal" class="modal-backdrop" style="display: none;" onclick="if(event.target === this) closeSettingsModal()">
+    <div class="modal-card modal-card-settings">
       <button class="modal-close" onclick="closeSettingsModal()">&times;</button>
       
       <div class="modal-header">
@@ -398,102 +398,104 @@
       </div>
 
       <form id="settingsForm" onsubmit="saveSettings(event)">
-        <div class="form-group">
-          <label for="cfgApiKey">Steam Web API Key (Optional / Recommended)</label>
-          <input type="text" id="cfgApiKey" placeholder="e.g. 32-character hexadecimal key">
-          <small class="form-hint">
-            Required if your Steam profile games list is set to Friends-Only or Private. 
-            <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">Get an API key here</a>.
-          </small>
-        </div>
-
-        <div class="form-row">
+        <div class="settings-scroll-body">
           <div class="form-group">
-            <label for="cfgPlatform">Target Game Platform</label>
-            <select id="cfgPlatform">
-              <option value="windows">Windows (Default - Recommended for NAS/Proton)</option>
-              <option value="linux">Linux (Native Linux depots)</option>
-              <option value="macos">macOS</option>
-            </select>
-            <small class="form-hint">Forces SteamCMD to download Windows depots even when running on Linux.</small>
+            <label for="cfgApiKey">Steam Web API Key (Optional / Recommended)</label>
+            <input type="text" id="cfgApiKey" placeholder="e.g. 32-character hexadecimal key">
+            <small class="form-hint">
+              Required if your Steam profile games list is set to Friends-Only or Private. 
+              <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">Get an API key here</a>.
+            </small>
           </div>
 
-          <div class="form-group">
-            <label for="cfgValidate">Validation</label>
-            <div class="checkbox-row">
-              <input type="checkbox" id="cfgValidate" checked>
-              <label for="cfgValidate">Validate files after download (<code>validate</code>)</label>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="cfgPlatform">Target Game Platform</label>
+              <select id="cfgPlatform">
+                <option value="windows">Windows (Default - Recommended for NAS/Proton)</option>
+                <option value="linux">Linux (Native Linux depots)</option>
+                <option value="macos">macOS</option>
+              </select>
+              <small class="form-hint">Forces SteamCMD to download Windows depots even when running on Linux.</small>
             </div>
-            <small class="form-hint">Checks hash integrity of all downloaded game files.</small>
-          </div>
-        </div>
 
-        <div class="form-group" style="margin-top: 14px;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <label for="cfgGoldberg" style="margin-bottom: 0;">DRM-Free Offline Wrapper (Goldberg)</label>
-            <span id="goldbergBinStatus" style="font-size: 0.75rem; color: var(--text-secondary);">Checking...</span>
-          </div>
-          <div class="checkbox-row" style="margin-top: 6px;">
-            <input type="checkbox" id="cfgGoldberg">
-            <label for="cfgGoldberg">Auto-apply Goldberg Emulator to downloaded games</label>
-          </div>
-          <small class="form-hint">
-            Replaces <code>steam_api(64).dll</code> with Goldberg emulator and generates <code>steam_appid.txt</code> so supported games launch offline without the Steam client. Authentic DLLs are saved as <code>.orig</code>.
-          </small>
-          <div id="goldbergMissingAlert" style="display: none; margin-top: 8px; padding: 8px 10px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; font-size: 0.8rem; color: #fca5a5; display: flex; justify-content: space-between; align-items: center;">
-            <span>⚠️ Emulator DLLs missing.</span>
-            <button type="button" id="btnDownloadGoldberg" class="btn btn-xs btn-outline" onclick="downloadGoldbergBinaries()">Download Now</button>
-          </div>
-        </div>
-
-        <div class="form-divider">
-          <span>SteamCMD Account Setup (For Commercial Games)</span>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label for="cfgUsername">Steam Username</label>
-            <input type="text" id="cfgUsername" placeholder="Auto-filled on QR login">
-          </div>
-          <div class="form-group">
-            <label for="cfgPassword">Steam Password</label>
-            <input type="password" id="cfgPassword" placeholder="Stored securely in container">
-          </div>
-        </div>
-        <small class="form-hint">
-          Commercial games require a licensed account in SteamCMD. Free dedicated servers/tools download anonymously.
-        </small>
-
-        <!-- SteamCMD One-and-Done Device Authorization Status Card -->
-        <div class="auth-status-card" id="settingsAuthStatusCard" style="margin-top: 14px; padding: 12px 14px; background: rgba(30, 41, 59, 0.6); border: 1px solid var(--border-color); border-radius: 8px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-            <div>
-              <div style="font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 8px;">
-                <span>Machine Authorization:</span>
-                <span id="cfgAuthStatusBadge" class="badge badge-subtle">Checking...</span>
+            <div class="form-group">
+              <label for="cfgValidate">Validation</label>
+              <div class="checkbox-row">
+                <input type="checkbox" id="cfgValidate" checked>
+                <label for="cfgValidate">Validate files after download (<code>validate</code>)</label>
               </div>
-              <small class="form-hint" id="cfgAuthStatusHint" style="margin-top: 4px; display: block;">
-                When authorized, SteamCMD downloads your games using saved machine tokens without prompting your phone for approval.
-              </small>
+              <small class="form-hint">Checks hash integrity of all downloaded game files.</small>
             </div>
-            <button type="button" id="cfgAuthorizeBtn" class="btn btn-sm btn-outline" onclick="openDeviceAuthorizationModal()">
-              Authorize Machine
-            </button>
           </div>
-        </div>
 
-        <div class="form-group" style="margin-top: 14px;">
-          <label for="cfgCustomArgs">Custom SteamCMD Extra Arguments</label>
-          <input type="text" id="cfgCustomArgs" placeholder="Optional extra parameters (e.g. +set_steam_guard_code ...)">
-        </div>
+          <div class="form-group">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <label for="cfgGoldberg" style="margin-bottom: 0;">DRM-Free Offline Wrapper (Goldberg)</label>
+              <span id="goldbergBinStatus" style="font-size: 0.75rem; color: var(--text-secondary);">Checking...</span>
+            </div>
+            <div class="checkbox-row" style="margin-top: 6px;">
+              <input type="checkbox" id="cfgGoldberg">
+              <label for="cfgGoldberg">Auto-apply Goldberg Emulator to downloaded games</label>
+            </div>
+            <small class="form-hint">
+              Replaces <code>steam_api(64).dll</code> with Goldberg emulator and generates <code>steam_appid.txt</code> so supported games launch offline without the Steam client. Authentic DLLs are saved as <code>.orig</code>.
+            </small>
+            <div id="goldbergMissingAlert" style="display: none; margin-top: 8px; padding: 8px 10px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; font-size: 0.8rem; color: #fca5a5; display: flex; justify-content: space-between; align-items: center;">
+              <span>⚠️ Emulator DLLs missing.</span>
+              <button type="button" id="btnDownloadGoldberg" class="btn btn-xs btn-outline" onclick="downloadGoldbergBinaries()">Download Now</button>
+            </div>
+          </div>
 
-        <div class="system-info-box">
-          <h4>Container & NAS Environment</h4>
-          <div class="sys-info-grid">
-            <div><strong>PUID:</strong> <span id="sysPuid">--</span></div>
-            <div><strong>PGID:</strong> <span id="sysPgid">--</span></div>
-            <div><strong>Download Dir:</strong> <span id="sysDownDir">/downloads</span></div>
-            <div><strong>Data Dir:</strong> <span id="sysDataDir">/app/data</span></div>
+          <div class="form-divider">
+            <span>SteamCMD Account Setup (For Commercial Games)</span>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="cfgUsername">Steam Username</label>
+              <input type="text" id="cfgUsername" placeholder="Auto-filled on QR login">
+            </div>
+            <div class="form-group">
+              <label for="cfgPassword">Steam Password</label>
+              <input type="password" id="cfgPassword" placeholder="Stored securely in container">
+            </div>
+          </div>
+          <small class="form-hint">
+            Commercial games require a licensed account in SteamCMD. Free dedicated servers/tools download anonymously.
+          </small>
+
+          <!-- SteamCMD One-and-Done Device Authorization Status Card -->
+          <div class="auth-status-card" id="settingsAuthStatusCard" style="padding: 12px 14px; background: rgba(30, 41, 59, 0.6); border: 1px solid var(--border-color); border-radius: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+              <div>
+                <div style="font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 8px;">
+                  <span>Machine Authorization:</span>
+                  <span id="cfgAuthStatusBadge" class="badge badge-subtle">Checking...</span>
+                </div>
+                <small class="form-hint" id="cfgAuthStatusHint" style="margin-top: 4px; display: block;">
+                  When authorized, SteamCMD downloads your games using saved machine tokens without prompting your phone for approval.
+                </small>
+              </div>
+              <button type="button" id="cfgAuthorizeBtn" class="btn btn-sm btn-outline" onclick="openDeviceAuthorizationModal()">
+                Authorize Machine
+              </button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="cfgCustomArgs">Custom SteamCMD Extra Arguments</label>
+            <input type="text" id="cfgCustomArgs" placeholder="Optional extra parameters (e.g. +set_steam_guard_code ...)">
+          </div>
+
+          <div class="system-info-box">
+            <h4>Container & NAS Environment</h4>
+            <div class="sys-info-grid">
+              <div><strong>PUID:</strong> <span id="sysPuid">--</span></div>
+              <div><strong>PGID:</strong> <span id="sysPgid">--</span></div>
+              <div><strong>Download Dir:</strong> <span id="sysDownDir">/downloads</span></div>
+              <div><strong>Data Dir:</strong> <span id="sysDataDir">/app/data</span></div>
+            </div>
           </div>
         </div>
 
@@ -506,7 +508,7 @@
   </div>
 
   <!-- Container Update Modal -->
-  <div id="updateModal" class="modal-backdrop" style="display: none;">
+  <div id="updateModal" class="modal-backdrop" style="display: none;" onclick="if(event.target === this) closeUpdateModal()">
     <div class="modal-card" style="max-width: 520px;">
       <div class="modal-header">
         <div style="display: flex; align-items: center; gap: 8px;">

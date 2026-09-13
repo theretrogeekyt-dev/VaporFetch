@@ -31,7 +31,12 @@ RUN dpkg --add-architecture i386 \
        libbz2-1.0:i386 \
        unzip \
        locales \
+    && echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
+    && locale-gen \
     && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=en_US.UTF-8 \
+    LC_ALL=en_US.UTF-8
 
 # Install SteamCMD directly from Valve and configure permissions
 RUN mkdir -p /steamcmd \

@@ -189,11 +189,11 @@ def configure_steam_autologin(username: str, steamid: str = "") -> None:
                     text = cfg_file.read_text(encoding="utf-8", errors="replace")
                     # Update or insert AutoLoginUser
                     if re.search(r'"AutoLoginUser"\s+"[^"]*"', text, flags=re.IGNORECASE):
-                        text = re.sub(r'("AutoLoginUser"\s+)"[^"]*"', rf'\g<1>"{clean_user}"', text, flags=re.IGNORECASE)
+                        text = re.sub(r'("AutoLoginUser"\s+)"[^"]*"', lambda m: f'{m.group(1)}"{clean_user}"', text, flags=re.IGNORECASE)
                     else:
                         steam_match = re.search(r'("Steam"\s*\{)', text, flags=re.IGNORECASE)
                         if steam_match:
-                            text = re.sub(r'("Steam"\s*\{)', rf'\g<1>\n\t\t\t\t"AutoLoginUser"\t\t"{clean_user}"', text, count=1, flags=re.IGNORECASE)
+                            text = re.sub(r'("Steam"\s*\{)', lambda m: f'{m.group(1)}\n\t\t\t\t"AutoLoginUser"\t\t"{clean_user}"', text, count=1, flags=re.IGNORECASE)
 
                     # Update or insert RememberPassword
                     if re.search(r'"RememberPassword"\s+"[^"]*"', text, flags=re.IGNORECASE):

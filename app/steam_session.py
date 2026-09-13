@@ -180,7 +180,10 @@ class SteamCmdSessionWorker:
 
             # 2. Send login command directly to interactive stdin
             if clean_pass:
-                login_line = f"login {clean_user} {clean_pass}\n"
+                if " " in clean_pass and not (clean_pass.startswith('"') and clean_pass.endswith('"')):
+                    login_line = f'login {clean_user} "{clean_pass}"\n'
+                else:
+                    login_line = f"login {clean_user} {clean_pass}\n"
             else:
                 login_line = f"login {clean_user}\n"
 

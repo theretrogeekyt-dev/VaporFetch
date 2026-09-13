@@ -178,7 +178,7 @@ class ContainerUpdater:
                 }
             )
             # Run in thread executor to avoid blocking event loop
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             def fetch_api():
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     return json.loads(resp.read().decode("utf-8"))
@@ -248,7 +248,7 @@ class ContainerUpdater:
         print(f"[Updater] Triggering self-update for container: {container_name}")
 
         # Run in executor to avoid blocking
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         def do_update():
             # 1. Pull the newest image first
             self.docker.pull_image("ghcr.io/theretrogeekyt-dev/vaporfetch", "latest", timeout=120)

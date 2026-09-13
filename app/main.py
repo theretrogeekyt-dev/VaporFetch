@@ -382,9 +382,22 @@ def _find_game_dir(appid: int) -> Optional[Path]:
     for item in queue_manager.items:
         if item.appid == appid and item.install_dir and Path(item.install_dir).exists():
             return Path(item.install_dir)
-    for child in DOWNLOAD_DIR.iterdir():
-        if child.is_dir() and (child / f"appmanifest_{appid}.acf").exists():
-            return child
+    try:
+        if DOWNLOAD_DIR.exists():
+            for child in DOWNLOAD_DIR.iterdir():
+                if not child.is_dir():
+                    continue
+                if (child / f"appmanifest_{appid}.acf").exists():
+                    return child
+                appid_file = child / "steam_appid.txt"
+                if appid_file.exists():
+                    try:
+                        if appid_file.read_text(encoding="utf-8", errors="ignore").strip() == str(appid):
+                            return child
+                    except Exception:
+                        pass
+    except Exception:
+        pass
     return None
 
 @app.get("/api/games/{appid}/goldberg")

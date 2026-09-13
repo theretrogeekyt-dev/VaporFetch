@@ -386,14 +386,18 @@ class DownloadQueueManager:
 
         except asyncio.CancelledError:
             item.status = "cancelled"
-            item.step = "Cancelled"
+            item.step = "Cancelled by user"
             item.log_tail.append("Download cancelled by user.")
             await steam_session.terminate_session()
         except Exception as ex:
-            item.status = "failed"
-            item.error = str(ex)
-            item.step = "Failed"
-            item.log_tail.append(f"Download failed: {ex}")
+            if item.status == "cancelled":
+                item.step = "Cancelled by user"
+                item.log_tail.append("Download cancelled by user.")
+            else:
+                item.status = "failed"
+                item.error = str(ex)
+                item.step = "Failed"
+                item.log_tail.append(f"Download failed: {ex}")
         finally:
             self.active_process = None
             self._save_queue()

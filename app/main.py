@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -62,12 +62,41 @@ class SettingsUpdateRequest(BaseModel):
     custom_steamcmd_args: Optional[str] = None
 
 
-@app.get("/", response_class=HTMLResponse)
-async def serve_index():
+def _load_web_ui_html() -> str:
     index_file = STATIC_DIR / "index.html"
     if index_file.exists():
-        return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>VaporFetch is initializing...</h1>")
+        return index_file.read_text(encoding="utf-8")
+    return "<h1>VaporFetch is initializing...</h1>"
+
+
+def _is_mobile_request(request: Request) -> bool:
+    user_agent = request.headers.get("user-agent", "").lower()
+    if not user_agent:
+        return False
+    mobile_hints = (
+        "android",
+        "iphone",
+        "ipad",
+        "ipod",
+        "mobile",
+        "blackberry",
+        "windows phone",
+    )
+    return any(hint in user_agent for hint in mobile_hints)
+
+
+@app.get("/", response_class=HTMLResponse)
+async def serve_index(request: Request, mode: Optional[str] = None):
+    if mode == "mobile":
+        return RedirectResponse(url="/mobile", status_code=307)
+    if mode != "desktop" and _is_mobile_request(request):
+        return RedirectResponse(url="/mobile", status_code=307)
+    return HTMLResponse(content=_load_web_ui_html())
+
+
+@app.get("/mobile", response_class=HTMLResponse)
+async def serve_mobile_index():
+    return HTMLResponse(content=_load_web_ui_html())
 
 
 @app.on_event("shutdown")
@@ -489,5 +518,4 @@ async def apply_container_update():
         return await container_updater.apply_update()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 

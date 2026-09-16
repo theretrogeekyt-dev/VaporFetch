@@ -7,9 +7,28 @@ let selectedGames = new Map(); // appid -> {appid, name}
 let activeDownloadItem = null;
 let qrPollTimer = null;
 let sseConnection = null;
+let uiMode = "desktop";
+
+function resolveUiMode() {
+  const params = new URLSearchParams(window.location.search);
+  if (window.location.pathname.startsWith("/mobile")) return "mobile";
+  if (params.get("mode") === "mobile") return "mobile";
+  return "desktop";
+}
+
+function applyUiMode() {
+  uiMode = resolveUiMode();
+  document.body.classList.toggle("mobile-mode", uiMode === "mobile");
+
+  const mobileLink = document.getElementById("mobileModeLink");
+  const desktopLink = document.getElementById("desktopModeLink");
+  if (mobileLink) mobileLink.style.display = uiMode === "mobile" ? "none" : "inline-flex";
+  if (desktopLink) desktopLink.style.display = uiMode === "mobile" ? "inline-flex" : "none";
+}
 
 // Initialization
 document.addEventListener("DOMContentLoaded", () => {
+  applyUiMode();
   checkAuthSession();
   fetchSystemStatus();
   initSSE();
@@ -1341,5 +1360,4 @@ async function triggerContainerUpdate() {
     }, 2000);
   }, 8000);
 }
-
 

@@ -10,9 +10,7 @@ let sseConnection = null;
 let uiMode = "desktop";
 
 function resolveUiMode() {
-  const params = new URLSearchParams(window.location.search);
   if (window.location.pathname.startsWith("/mobile")) return "mobile";
-  if (params.get("mode") === "mobile") return "mobile";
   return "desktop";
 }
 
@@ -1360,4 +1358,3 @@ async function triggerContainerUpdate() {
     }, 2000);
   }, 8000);
 }
-

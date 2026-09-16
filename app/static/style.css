@@ -167,6 +167,7 @@ body {
 .mode-switches {
   display: flex;
   align-items: center;
+  gap: 8px;
 }
 
 .mode-switch-link {
@@ -1779,5 +1780,4 @@ body.mobile-mode .mode-switch-link,
 body.mobile-mode .logout-btn {
   min-height: 42px;
 }
-
 

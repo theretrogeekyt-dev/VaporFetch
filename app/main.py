@@ -69,28 +69,30 @@ def _load_web_ui_html() -> str:
     return "<h1>VaporFetch is initializing...</h1>"
 
 
+MOBILE_USER_AGENT_HINTS = (
+    "android",
+    "iphone",
+    "ipad",
+    "ipod",
+    "mobile",
+    "blackberry",
+    "windows phone",
+)
+
+
 def _is_mobile_request(request: Request) -> bool:
     user_agent = request.headers.get("user-agent", "").lower()
     if not user_agent:
         return False
-    mobile_hints = (
-        "android",
-        "iphone",
-        "ipad",
-        "ipod",
-        "mobile",
-        "blackberry",
-        "windows phone",
-    )
-    return any(hint in user_agent for hint in mobile_hints)
+    return any(hint in user_agent for hint in MOBILE_USER_AGENT_HINTS)
 
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_index(request: Request, mode: Optional[str] = None):
     if mode == "mobile":
-        return RedirectResponse(url="/mobile", status_code=307)
+        return RedirectResponse(url="/mobile", status_code=302)
     if mode != "desktop" and _is_mobile_request(request):
-        return RedirectResponse(url="/mobile", status_code=307)
+        return RedirectResponse(url="/mobile", status_code=302)
     return HTMLResponse(content=_load_web_ui_html())
 
 
@@ -518,4 +520,3 @@ async def apply_container_update():
         return await container_updater.apply_update()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-

@@ -1,4 +1,5 @@
 import os
+import time
 import shutil
 import asyncio
 from pathlib import Path
@@ -47,6 +48,7 @@ class QueueAddRequest(BaseModel):
 class SteamCmdAuthRequest(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
+    api_key: Optional[str] = None
 
 class SteamCmdCodeRequest(BaseModel):
     code: str
@@ -166,12 +168,28 @@ async def get_session():
     steamcmd_authorized = auth_status["authorized"]
 
     if not session:
-        return {
-            "authenticated": False,
-            "has_password": has_password,
-            "steamcmd_authorized": steamcmd_authorized,
-            "setup_complete": False
-        }
+        # Check if steamcmd is authorized and we have a username
+        if steamcmd_authorized and settings.get("steamcmd_username"):
+            from app.config import extract_account_info_from_loginusers
+            acc_info = extract_account_info_from_loginusers(settings.get("steamcmd_username"))
+            if acc_info and acc_info.get("steamid"):
+                session = {
+                    "authenticated": True,
+                    "account_name": settings.get("steamcmd_username"),
+                    "steamid": acc_info["steamid"],
+                    "personaname": acc_info.get("personaname", settings.get("steamcmd_username")),
+                    "login_time": int(time.time()),
+                }
+                auth_manager._current_session = session
+                auth_manager._save_persisted_session()
+
+        if not session:
+            return {
+                "authenticated": False,
+                "has_password": has_password,
+                "steamcmd_authorized": steamcmd_authorized,
+                "setup_complete": False
+            }
     
     # If persona/avatar not fetched yet, try fetching
     if "personaname" not in session and session.get("steamid"):
@@ -208,6 +226,8 @@ async def get_steamcmd_auth_status():
 @app.post("/api/auth/steamcmd/authorize")
 async def start_steamcmd_auth(req: SteamCmdAuthRequest):
     try:
+        if req.api_key and req.api_key.strip():
+            save_settings({"steam_api_key": req.api_key.strip()})
         status = await steamcmd_auth_manager.start_authorization(username=req.username, password=req.password)
         return status
     except ValueError as ve:

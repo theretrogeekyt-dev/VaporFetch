@@ -181,8 +181,8 @@ function handleUserChipClick() {
     // Open profile bottom sheet
     openProfileModal();
   } else {
-    // Open QR login modal
-    openQrModal();
+    // Open Steam Guard login modal
+    openLoginModal();
   }
 }
 
@@ -222,213 +222,214 @@ async function logoutMobile() {
   }
 }
 
-// ---------------- Steam Guard QR Modal ---------------- //
-function openQrModal() {
+// ---------------- Steam Guard Mobile Login (App Approval) ---------------- //
+let mobileLoginPollTimer = null;
+
+function openLoginModal() {
   vibrate(12);
-  const modal = document.getElementById("mobileQrModal");
+  const modal = document.getElementById("mobileLoginModal");
   if (!modal) return;
+
+  const formStage = document.getElementById("mLoginFormStage");
+  const approvalStage = document.getElementById("mLoginApprovalStage");
+  const successStage = document.getElementById("mLoginSuccessStage");
+  const errEl = document.getElementById("mLoginError");
+  const usernameInput = document.getElementById("mLoginUsername");
+  const passInput = document.getElementById("mLoginPassword");
+
+  if (formStage) formStage.style.display = "block";
+  if (approvalStage) approvalStage.style.display = "none";
+  if (successStage) successStage.style.display = "none";
+  if (errEl) errEl.style.display = "none";
+
+  // Pre-fill username from settings if available
+  const settingsUser = document.getElementById("mCfgUsername")?.value || "";
+  if (usernameInput && !usernameInput.value && settingsUser) {
+    usernameInput.value = settingsUser;
+  }
+  if (passInput) passInput.value = "";
+
   modal.style.display = "flex";
-  startQrSession();
 }
 
-function closeQrModal() {
-  if (qrPollTimer) {
-    clearInterval(qrPollTimer);
-    qrPollTimer = null;
+function closeLoginModal() {
+  if (mobileLoginPollTimer) {
+    clearInterval(mobileLoginPollTimer);
+    mobileLoginPollTimer = null;
   }
-  if (steamCmdAuthPollTimer) {
-    clearInterval(steamCmdAuthPollTimer);
-    steamCmdAuthPollTimer = null;
-  }
-  const modal = document.getElementById("mobileQrModal");
+  const modal = document.getElementById("mobileLoginModal");
   if (modal) modal.style.display = "none";
 }
 
-async function startQrSession() {
-  const loading = document.getElementById("mQrLoading");
-  const img = document.getElementById("mQrImg");
-  const statusText = document.getElementById("mQrStatusText");
-  const scanStage = document.getElementById("mQrScanStage");
-  const passStage = document.getElementById("mQrPassStage");
-  const authStage = document.getElementById("mQrAuthStage");
-
-  if (scanStage) scanStage.style.display = "block";
-  if (passStage) passStage.style.display = "none";
-  if (authStage) authStage.style.display = "none";
-  if (loading) loading.style.display = "flex";
-  if (img) img.style.display = "none";
-  if (statusText) statusText.textContent = "Connecting to Steam...";
-
-  if (qrPollTimer) clearInterval(qrPollTimer);
-
-  try {
-    const res = await fetch("/api/auth/qr/begin", { method: "POST" });
-    if (!res.ok) throw new Error("Could not begin QR auth session");
-    const data = await res.json();
-
-    if (img) {
-      img.src = data.qr_data_url;
-      img.style.display = "block";
-    }
-    if (loading) loading.style.display = "none";
-    if (statusText) statusText.textContent = "Waiting for Steam Mobile approval...";
-
-    const pollInterval = (data.interval || 5) * 1000;
-    qrPollTimer = setInterval(() => {
-      pollQrStatus(data.client_id, data.request_id);
-    }, pollInterval);
-  } catch (e) {
-    if (statusText) statusText.textContent = "Failed to start QR session.";
-    showToast(e.message, true);
+function toggleMobileApiKey(event) {
+  if (event) event.preventDefault();
+  const wrap = document.getElementById("mLoginApiKeyWrap");
+  if (wrap) {
+    wrap.style.display = wrap.style.display === "none" ? "block" : "none";
   }
 }
 
-async function pollQrStatus(clientId, requestId) {
-  try {
-    const res = await fetch("/api/auth/qr/poll", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: clientId, request_id: requestId })
-    });
-    if (!res.ok) return;
-    const data = await res.json();
-
-    if (data.status === "confirmed") {
-      clearInterval(qrPollTimer);
-      qrPollTimer = null;
-      vibrate(30);
-
-      // Check if password already stored
-      const sessRes = await fetch("/api/auth/session");
-      const sessData = await sessRes.json();
-      currentUser = sessData.session;
-      renderAuthenticatedUser(currentUser);
-      loadLibrary();
-
-      if (sessData.has_password) {
-        // Proceed straight to device auth stage
-        startDeviceAuthMobile(currentUser.account_name, "");
-      } else {
-        // Transition to Password prompt
-        showPasswordStageMobile();
-      }
-    }
-  } catch (e) {
-    console.warn("Polling error:", e);
-  }
-}
-
-function showPasswordStageMobile() {
-  const scanStage = document.getElementById("mQrScanStage");
-  const passStage = document.getElementById("mQrPassStage");
-  const authStage = document.getElementById("mQrAuthStage");
-  if (scanStage) scanStage.style.display = "none";
-  if (passStage) passStage.style.display = "block";
-  if (authStage) authStage.style.display = "none";
-}
-
-async function submitOneTimePasswordMobile(event) {
+async function submitMobileLogin(event) {
   event.preventDefault();
-  const passInput = document.getElementById("mOneTimePass");
-  const password = passInput?.value || "";
-  if (!password) return;
+  const username = document.getElementById("mLoginUsername")?.value?.trim() || "";
+  const password = document.getElementById("mLoginPassword")?.value || "";
+  const apiKey = document.getElementById("mLoginApiKey")?.value?.trim() || "";
+  const errEl = document.getElementById("mLoginError");
 
-  const username = currentUser?.account_name || "";
+  if (!username || !password) {
+    if (errEl) {
+      errEl.textContent = "Please enter both username and password.";
+      errEl.style.display = "block";
+    }
+    return;
+  }
+
+  if (errEl) errEl.style.display = "none";
+
+  const formStage = document.getElementById("mLoginFormStage");
+  const approvalStage = document.getElementById("mLoginApprovalStage");
+  const statusText = document.getElementById("mLoginStatusText");
+
+  if (formStage) formStage.style.display = "none";
+  if (approvalStage) approvalStage.style.display = "block";
+  if (statusText) statusText.textContent = "Connecting to Steam servers...";
+
   try {
-    await fetch("/api/settings", {
+    const res = await fetch("/api/auth/steamcmd/authorize", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        steamcmd_username: username,
-        steamcmd_password: password
+        username: username,
+        password: password,
+        api_key: apiKey || undefined
       })
     });
-    showToast("Password saved to NAS storage!");
-    startDeviceAuthMobile(username, password);
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Failed to initiate Steam login");
+    }
+
+    pollMobileLoginStatus();
   } catch (e) {
-    showToast("Failed to save password: " + e.message, true);
+    if (formStage) formStage.style.display = "block";
+    if (approvalStage) approvalStage.style.display = "none";
+    if (errEl) {
+      errEl.textContent = e.message;
+      errEl.style.display = "block";
+    }
+    showToast(e.message, true);
   }
 }
 
-function skipPasswordMobile() {
-  closeQrModal();
-  checkAuthSession();
-}
+function pollMobileLoginStatus() {
+  if (mobileLoginPollTimer) clearInterval(mobileLoginPollTimer);
 
-function startDeviceAuthMobile(username, password) {
-  const passStage = document.getElementById("mQrPassStage");
-  const authStage = document.getElementById("mQrAuthStage");
-  if (passStage) passStage.style.display = "none";
-  if (authStage) authStage.style.display = "block";
-
-  fetch("/api/auth/steamcmd/authorize", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password })
-  }).then(r => r.json()).then(() => {
-    pollDeviceAuthStatusMobile();
-  }).catch(e => {
-    showToast(e.message, true);
-  });
-}
-
-function pollDeviceAuthStatusMobile() {
-  if (steamCmdAuthPollTimer) clearInterval(steamCmdAuthPollTimer);
-  steamCmdAuthPollTimer = setInterval(async () => {
+  mobileLoginPollTimer = setInterval(async () => {
     try {
       const res = await fetch("/api/auth/steamcmd/status");
       if (!res.ok) return;
       const data = await res.json();
 
-      const logText = document.getElementById("mAuthLogText");
-      const msg = document.getElementById("mAuthStageMsg");
-      const codeGroup = document.getElementById("mAuthCodeGroup");
+      const statusText = document.getElementById("mLoginStatusText");
+      const fallbackWrap = document.getElementById("mLoginFallbackWrap");
 
-      if (logText) logText.textContent = data.status_message || "Authorizing...";
-      if (data.state === "waiting_code") {
-        if (codeGroup) codeGroup.style.display = "block";
-      } else {
-        if (codeGroup) codeGroup.style.display = "none";
+      if (data.state === "waiting_approval") {
+        if (statusText) statusText.textContent = "Steam Guard request sent! Please tap 'Approve' in your Steam Mobile app.";
+      } else if (data.state === "waiting_code") {
+        if (statusText) statusText.textContent = "Steam Guard code required. Enter your 5-character code below:";
+        if (fallbackWrap) fallbackWrap.style.display = "block";
+        document.getElementById("mLoginCodeInput")?.focus();
+      } else if (data.status_message) {
+        if (statusText) statusText.textContent = data.status_message;
       }
 
+      // Check success
       if (data.authorized || data.state === "success") {
-        clearInterval(steamCmdAuthPollTimer);
-        steamCmdAuthPollTimer = null;
-        vibrate([20, 50, 20]);
-        if (msg) msg.textContent = "Machine authorized! Future downloads will run without phone prompts.";
-        showToast("Machine authorized successfully! ✅");
+        clearInterval(mobileLoginPollTimer);
+        mobileLoginPollTimer = null;
+        vibrate([20, 60, 20]);
+
+        const approvalStage = document.getElementById("mLoginApprovalStage");
+        const successStage = document.getElementById("mLoginSuccessStage");
+        const successUser = document.getElementById("mLoginSuccessUser");
+
+        if (approvalStage) approvalStage.style.display = "none";
+        if (successStage) successStage.style.display = "block";
+        if (successUser) {
+          successUser.textContent = `Connected as ${data.username || "Steam User"}`;
+        }
+
+        showToast("Logged in to Steam successfully! ✅");
+
+        // Reload session and library
+        await checkAuthSession();
+
         setTimeout(() => {
-          closeQrModal();
-          checkAuthSession();
-        }, 1800);
+          closeLoginModal();
+        }, 1500);
+      } else if (data.state === "error") {
+        clearInterval(mobileLoginPollTimer);
+        mobileLoginPollTimer = null;
+        vibrate(40);
+
+        const formStage = document.getElementById("mLoginFormStage");
+        const approvalStage = document.getElementById("mLoginApprovalStage");
+        const errEl = document.getElementById("mLoginError");
+
+        if (formStage) formStage.style.display = "block";
+        if (approvalStage) approvalStage.style.display = "none";
+        if (errEl) {
+          errEl.textContent = data.status_message || "Login failed. Please verify credentials.";
+          errEl.style.display = "block";
+        }
+        showToast(data.status_message || "Steam login failed", true);
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn("Poll login error:", e);
+    }
   }, 2000);
 }
 
+async function submitMobileLoginCode() {
+  const codeInput = document.getElementById("mLoginCodeInput");
+  const code = codeInput?.value?.trim() || "";
+  if (!code) return;
+
+  try {
+    const res = await fetch("/api/auth/steamcmd/code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: code })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Failed to submit code");
+    }
+    showToast("Submitted Steam Guard code, verifying...");
+  } catch (e) {
+    showToast(e.message, true);
+  }
+}
+
+async function cancelMobileLogin() {
+  try {
+    await fetch("/api/auth/steamcmd/cancel", { method: "POST" });
+  } catch (e) {}
+
+  if (mobileLoginPollTimer) {
+    clearInterval(mobileLoginPollTimer);
+    mobileLoginPollTimer = null;
+  }
+
+  const formStage = document.getElementById("mLoginFormStage");
+  const approvalStage = document.getElementById("mLoginApprovalStage");
+  if (formStage) formStage.style.display = "block";
+  if (approvalStage) approvalStage.style.display = "none";
+}
+
 function openDeviceAuthFromSettings() {
-  vibrate(10);
-  const username = document.getElementById("mCfgUsername")?.value || currentUser?.account_name || "";
-  const password = document.getElementById("mCfgPassword")?.value || "";
-
-  if (!username) {
-    showToast("Please enter your Steam username in Settings first.", true);
-    return;
-  }
-  if (!password) {
-    showToast("Please enter your Steam password in Settings first.", true);
-    return;
-  }
-
-  openQrModal();
-  const scanStage = document.getElementById("mQrScanStage");
-  const passStage = document.getElementById("mQrPassStage");
-  const authStage = document.getElementById("mQrAuthStage");
-  if (scanStage) scanStage.style.display = "none";
-  if (passStage) passStage.style.display = "none";
-  if (authStage) authStage.style.display = "block";
-
-  startDeviceAuthMobile(username, password);
+  openLoginModal();
 }
 
 // ---------------- Game Library ---------------- //

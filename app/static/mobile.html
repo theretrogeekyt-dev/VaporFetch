@@ -42,7 +42,7 @@
       </div>
 
       <!-- Steam Sign-in Button -->
-      <button id="mobileLoginBtn" class="btn btn-steam btn-xs" onclick="openQrModal()" title="Log in with Steam Guard">
+      <button id="mobileLoginBtn" class="btn btn-steam btn-xs" onclick="openLoginModal()" title="Log in with Steam Guard">
         <svg class="steam-icon" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 2C6.48 2 2 6.48 2 12c0 4.84 3.44 8.87 8 9.8V15.2l-2.4-1.2v-.03c-.34-.17-.6-.46-.73-.83L2.24 11.2C2.08 11.46 2 11.72 2 12c0 5.52 4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm3.3 14.1c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
         </svg>
@@ -101,12 +101,12 @@
       <div id="mobileAuthPrompt" class="placeholder-card" style="display: none;">
         <div class="placeholder-icon">🔑</div>
         <h2>Steam Authentication Required</h2>
-        <p>Log in using modern Steam Guard QR code authentication to automatically browse and batch-download your games library.</p>
-        <button class="btn btn-steam btn-large btn-block" onclick="openQrModal()">
+        <p>Log in with your Steam account to browse and batch-download your games library directly to your NAS.</p>
+        <button class="btn btn-steam btn-large btn-block" onclick="openLoginModal()">
           <svg class="steam-icon" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 2C6.48 2 2 6.48 2 12c0 4.84 3.44 8.87 8 9.8V15.2l-2.4-1.2v-.03c-.34-.17-.6-.46-.73-.83L2.24 11.2C2.08 11.46 2 11.72 2 12c0 5.52 4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm3.3 14.1c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
           </svg>
-          <span>Scan Steam Guard QR Code</span>
+          <span>Sign In with Steam Guard</span>
         </button>
       </div>
 
@@ -348,74 +348,92 @@
     </button>
   </nav>
 
-  <!-- Mobile Bottom Sheet / Modal: Steam Guard QR Login -->
-  <div id="mobileQrModal" class="mobile-modal-backdrop" style="display: none;" onclick="if(event.target === this) closeQrModal()">
+  <!-- Mobile Bottom Sheet / Modal: Steam Guard Login (App Approval) -->
+  <div id="mobileLoginModal" class="mobile-modal-backdrop" style="display: none;" onclick="if(event.target === this) closeLoginModal()">
     <div class="mobile-bottom-sheet">
       <div class="sheet-drag-handle"></div>
       <div class="sheet-header">
-        <h3>Steam Guard QR Login</h3>
-        <button class="sheet-close-btn" onclick="closeQrModal()">&times;</button>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <svg class="steam-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12c0 4.84 3.44 8.87 8 9.8V15.2l-2.4-1.2v-.03c-.34-.17-.6-.46-.73-.83L2.24 11.2C2.08 11.46 2 11.72 2 12c0 5.52 4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm3.3 14.1c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+          </svg>
+          <h3>Steam Guard Sign In</h3>
+        </div>
+        <button class="sheet-close-btn" onclick="closeLoginModal()">&times;</button>
       </div>
 
-      <!-- Stage 1: QR Display -->
-      <div id="mQrScanStage">
-        <p class="sheet-sub">Scan once with the Steam Mobile app on your phone to connect.</p>
-        <div class="mobile-qr-wrapper">
-          <div id="mQrLoading" class="mobile-qr-spinner">
-            <div class="spinner"></div>
-            <p>Generating challenge...</p>
-          </div>
-          <img id="mQrImg" src="" alt="Steam Guard QR" style="display: none;">
-        </div>
+      <!-- Stage 1: Enter Username & Password -->
+      <div id="mLoginFormStage">
+        <p class="sheet-sub">Enter your credentials. VaporFetch will send a login approval prompt to your Steam Mobile app.</p>
 
-        <div class="qr-status-indicator">
-          <span class="pulse-dot"></span>
-          <span id="mQrStatusText">Waiting for mobile approval...</span>
-        </div>
-
-        <div class="sheet-btns">
-          <button class="btn btn-secondary btn-block" onclick="startQrSession()">Refresh QR Code</button>
-        </div>
-      </div>
-
-      <!-- Stage 2: Password Input -->
-      <div id="mQrPassStage" style="display: none;">
-        <div class="verified-chip">✓ Steam Guard Confirmed!</div>
-        <p class="sheet-sub">Enter your password once to authorize SteamCMD to download your games to your NAS.</p>
-
-        <form onsubmit="submitOneTimePasswordMobile(event)">
+        <form onsubmit="submitMobileLogin(event)">
           <div class="mobile-form-group">
-            <label for="mOneTimePass">Steam Password</label>
-            <input type="password" id="mOneTimePass" placeholder="Enter password" required autocomplete="current-password">
+            <label for="mLoginUsername">Steam Username</label>
+            <input type="text" id="mLoginUsername" placeholder="Steam account username" required autocomplete="username" autocapitalize="none" autocorrect="off">
           </div>
-          <div class="sheet-btns" style="margin-top: 14px;">
-            <button type="button" class="btn btn-secondary" onclick="skipPasswordMobile()">Skip</button>
-            <button type="submit" class="btn btn-primary flex-1">Save & Authorize</button>
+          <div class="mobile-form-group" style="margin-top: 10px;">
+            <label for="mLoginPassword">Steam Password</label>
+            <input type="password" id="mLoginPassword" placeholder="Steam password" required autocomplete="current-password">
+          </div>
+
+          <div style="margin-top: 8px;">
+            <a href="#" class="btn-text-xs" onclick="toggleMobileApiKey(event)">+ Optional: Steam Web API Key</a>
+            <div id="mLoginApiKeyWrap" style="display: none; margin-top: 6px;">
+              <input type="text" id="mLoginApiKey" placeholder="32-character hexadecimal key">
+              <small class="form-hint" style="display: block; margin-top: 4px;">Recommended if your profile game details are set to Friends-Only or Private.</small>
+            </div>
+          </div>
+
+          <div id="mLoginError" style="display: none; margin-top: 12px; padding: 10px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; color: #fca5a5; font-size: 12px;"></div>
+
+          <div class="sheet-btns" style="margin-top: 16px;">
+            <button type="submit" class="btn btn-steam btn-large btn-block" id="btnSubmitMobileLogin">
+              <svg class="steam-icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.48 2 2 6.48 2 12c0 4.84 3.44 8.87 8 9.8V15.2l-2.4-1.2v-.03c-.34-.17-.6-.46-.73-.83L2.24 11.2C2.08 11.46 2 11.72 2 12c0 5.52 4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm3.3 14.1c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+              </svg>
+              <span>Log In with Steam Guard</span>
+            </button>
           </div>
         </form>
       </div>
 
-      <!-- Stage 3: Device Authorization Status -->
-      <div id="mQrAuthStage" style="display: none;">
-        <div class="verified-chip">🔑 Machine Authorization</div>
-        <p id="mAuthStageMsg" class="sheet-sub">Please approve the login prompt in your Steam Mobile app.</p>
+      <!-- Stage 2: Waiting for Steam Guard Mobile App Approval -->
+      <div id="mLoginApprovalStage" style="display: none;">
+        <div class="approval-card-visual">
+          <div class="shield-pulse-ring">
+            <svg class="shield-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <path d="M9 12l2 2 4-4"/>
+            </svg>
+          </div>
+          <h4>Approve on Steam Mobile</h4>
+          <p class="sheet-sub">A login approval request has been sent to your <strong>Steam Mobile app</strong> on this phone.<br>Pull down your notification shade or open Steam and tap <strong>Approve</strong>.</p>
+        </div>
 
-        <div id="mAuthCodeGroup" style="display: none; margin-top: 10px;">
-          <label style="font-size: 12px; font-weight: 600;">Steam Guard Code</label>
-          <div style="display: flex; gap: 8px; margin-top: 4px;">
-            <input type="text" id="mAuthCodeInput" placeholder="Code" maxlength="10" style="flex: 1; text-transform: uppercase;">
-            <button type="button" class="btn btn-primary btn-sm" onclick="submitAuthCodeMobile()">Submit</button>
+        <div class="qr-status-indicator">
+          <span class="pulse-dot"></span>
+          <span id="mLoginStatusText">Waiting for Steam Guard approval...</span>
+        </div>
+
+        <!-- Fallback 2FA Code Input -->
+        <div id="mLoginFallbackWrap" style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+          <small class="form-hint" style="display: block; margin-bottom: 6px;">Using an authenticator code or email code instead?</small>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="mLoginCodeInput" placeholder="5-char code" maxlength="10" style="flex: 1; text-transform: uppercase; font-family: monospace; font-size: 14px; text-align: center;">
+            <button type="button" class="btn btn-primary btn-sm" onclick="submitMobileLoginCode()">Submit Code</button>
           </div>
         </div>
 
-        <div class="qr-status-indicator" style="margin-top: 14px;">
-          <span class="pulse-dot"></span>
-          <span id="mAuthLogText">Connecting to Steam...</span>
+        <div class="sheet-btns" style="margin-top: 16px;">
+          <button type="button" class="btn btn-secondary btn-block" onclick="cancelMobileLogin()">Cancel</button>
         </div>
+      </div>
 
-        <div class="sheet-btns" style="margin-top: 14px;">
-          <button type="button" class="btn btn-primary btn-block" onclick="closeQrModal()">Done</button>
-        </div>
+      <!-- Stage 3: Confirmed Success -->
+      <div id="mLoginSuccessStage" style="display: none; text-align: center; padding: 20px 0;">
+        <div class="verified-chip" style="font-size: 15px; padding: 8px 16px;">✓ Steam Guard Confirmed!</div>
+        <h3 id="mLoginSuccessUser" style="margin-top: 12px;">Connected</h3>
+        <p class="sheet-sub">Device authorized! Loading your library...</p>
       </div>
     </div>
   </div>

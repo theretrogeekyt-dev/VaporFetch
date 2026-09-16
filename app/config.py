@@ -274,3 +274,62 @@ def save_settings(new_settings: dict) -> dict:
         json.dump(current, f, indent=2)
     return current
 
+
+def extract_account_info_from_loginusers(account_name: Optional[str] = None) -> Optional[Dict[str, str]]:
+    """
+    Extracts the 64-bit SteamID and PersonaName from loginusers.vdf or Steam userdata directories.
+    """
+    search_dirs = [
+        Path("/home/steam/Steam/config"),
+        Path("/home/steam/.steam/steam/config"),
+        STEAM_HOME_DIR / "Steam/config",
+        DATA_DIR / "steam_config",
+    ]
+    
+    # 1. Parse loginusers.vdf
+    for cdir in search_dirs:
+        vdf_path = cdir / "loginusers.vdf"
+        if vdf_path.exists():
+            try:
+                content = vdf_path.read_text(encoding="utf-8", errors="replace")
+                user_matches = re.finditer(r'"(\d{17})"\s*\{([^}]+)\}', content)
+                for match in user_matches:
+                    sid = match.group(1)
+                    block = match.group(2)
+                    acc_m = re.search(r'"AccountName"\s+"([^"]+)"', block, re.IGNORECASE)
+                    pers_m = re.search(r'"PersonaName"\s+"([^"]+)"', block, re.IGNORECASE)
+                    acc = acc_m.group(1) if acc_m else ""
+                    pers = pers_m.group(1) if pers_m else ""
+                    if not account_name or (acc.lower() == account_name.lower()):
+                        return {
+                            "steamid": sid,
+                            "account_name": acc or account_name or "Steam User",
+                            "personaname": pers or acc or account_name or "Steam User"
+                        }
+            except Exception as e:
+                print(f"[Config] Error reading {vdf_path}: {e}")
+
+    # 2. Fallback: inspect userdata/<account_id> directories
+    userdata_dirs = [
+        Path("/home/steam/Steam/userdata"),
+        Path("/home/steam/.steam/steam/userdata"),
+        STEAM_HOME_DIR / "Steam/userdata",
+    ]
+    for udir in userdata_dirs:
+        if udir.exists() and udir.is_dir():
+            try:
+                for child in udir.iterdir():
+                    if child.is_dir() and child.name.isdigit():
+                        account_id = int(child.name)
+                        if account_id > 0:
+                            steamid64 = str(76561197960265728 + account_id)
+                            return {
+                                "steamid": steamid64,
+                                "account_name": account_name or "Steam User",
+                                "personaname": account_name or "Steam User"
+                            }
+            except Exception:
+                pass
+
+    return None
+

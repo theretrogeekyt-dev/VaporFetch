@@ -1,4 +1,5 @@
 import asyncio
+import time
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -7,7 +8,8 @@ from app.config import (
     load_settings, 
     save_settings, 
     sync_steam_credentials,
-    has_steam_credentials
+    has_steam_credentials,
+    extract_account_info_from_loginusers
 )
 from app.steam_session import steam_session
 
@@ -36,6 +38,9 @@ class SteamCmdAuthManager:
             current_state = "success" if is_authorized else self.state
             status_msg = self.status_message or ("Machine is authorized." if is_authorized else "Not authorized.")
 
+        from app.auth import auth_manager
+        current_session = auth_manager.get_session()
+
         return {
             "authorized": is_authorized,
             "connected": steam_session.is_ready(),
@@ -46,6 +51,7 @@ class SteamCmdAuthManager:
             "username": settings.get("steamcmd_username", "") or session_stat.get("username", ""),
             "has_password": bool(settings.get("steamcmd_password")),
             "logs": session_stat["logs"] or self.log_lines[-20:],
+            "session": current_session,
         }
 
     async def start_authorization(self, username: Optional[str] = None, password: Optional[str] = None) -> Dict[str, Any]:
@@ -78,6 +84,33 @@ class SteamCmdAuthManager:
                     "steamcmd_username": username,
                     "steamcmd_password": password
                 })
+                sync_steam_credentials()
+
+                # Sync user session for UI (Mobile & Desktop)
+                account_info = extract_account_info_from_loginusers(username)
+                steamid = account_info.get("steamid", "") if account_info else ""
+                persona = account_info.get("personaname", username) if account_info else username
+
+                from app.auth import auth_manager
+                session_data = {
+                    "authenticated": True,
+                    "account_name": username,
+                    "steamid": steamid,
+                    "personaname": persona,
+                    "login_time": int(time.time()),
+                }
+
+                if steamid:
+                    try:
+                        from app.steam_api import steam_api_client
+                        profile = await steam_api_client.get_player_summary(steamid=steamid)
+                        if profile:
+                            session_data.update(profile)
+                    except Exception as ex:
+                        print(f"[SteamCmdAuth] Error getting player summary: {ex}")
+
+                auth_manager._current_session = session_data
+                auth_manager._save_persisted_session()
             except Exception as e:
                 self.state = "error"
                 self.status_message = str(e)

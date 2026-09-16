@@ -62,12 +62,60 @@ class SettingsUpdateRequest(BaseModel):
     custom_steamcmd_args: Optional[str] = None
 
 
-@app.get("/", response_class=HTMLResponse)
-async def serve_index():
-    index_file = STATIC_DIR / "index.html"
-    if index_file.exists():
-        return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
+def is_mobile_user_agent(user_agent: str) -> bool:
+    if not user_agent:
+        return False
+    ua = user_agent.lower()
+    return any(keyword in ua for keyword in [
+        "android", "mobile", "iphone", "ipad", "ipod", "webos", "blackberry", "iemobile", "opera mini"
+    ])
+
+
+def _render_html(filename: str, set_cookie: Optional[str] = None) -> Response:
+    filepath = STATIC_DIR / filename
+    if filepath.exists():
+        content = filepath.read_text(encoding="utf-8")
+        resp = HTMLResponse(content=content)
+        if set_cookie:
+            resp.set_cookie(key="vf_view_mode", value=set_cookie, max_age=60*60*24*365, httponly=False)
+        return resp
+    # Fallback to index.html if mobile.html is temporarily absent
+    fallback = STATIC_DIR / "index.html"
+    if fallback.exists():
+        return HTMLResponse(content=fallback.read_text(encoding="utf-8"))
     return HTMLResponse("<h1>VaporFetch is initializing...</h1>")
+
+
+@app.get("/")
+async def serve_index(request: Request, view: Optional[str] = None):
+    # 1. Query parameter override: ?view=mobile or ?view=desktop
+    if view == "mobile":
+        return _render_html("mobile.html", set_cookie="mobile")
+    elif view == "desktop":
+        return _render_html("index.html", set_cookie="desktop")
+
+    # 2. Saved user preference in cookie
+    cookie_pref = request.cookies.get("vf_view_mode")
+    if cookie_pref == "mobile":
+        return _render_html("mobile.html")
+    elif cookie_pref == "desktop":
+        return _render_html("index.html")
+
+    # 3. Automatic detection from User-Agent (Android / mobile devices)
+    user_agent = request.headers.get("user-agent", "")
+    if is_mobile_user_agent(user_agent):
+        return _render_html("mobile.html")
+    return _render_html("index.html")
+
+
+@app.get("/mobile", response_class=HTMLResponse)
+async def serve_mobile(request: Request):
+    return _render_html("mobile.html", set_cookie="mobile")
+
+
+@app.get("/desktop", response_class=HTMLResponse)
+async def serve_desktop(request: Request):
+    return _render_html("index.html", set_cookie="desktop")
 
 
 @app.on_event("shutdown")

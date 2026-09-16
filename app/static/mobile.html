@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0f1d">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>VaporFetch Mobile - Steam NAS Downloader</title>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/mobile.css">
+</head>
+<body>
+
+  <!-- Top Mobile App Bar -->
+  <header class="mobile-appbar">
+    <div class="appbar-brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12c0 4.84 3.44 8.87 8 9.8V15.2l-2.4-1.2v-.03c-.34-.17-.6-.46-.73-.83L2.24 11.2C2.08 11.46 2 11.72 2 12c0 5.52 4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm3.3 14.1c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+      </div>
+      <span class="brand-text">VaporFetch</span>
+    </div>
+
+    <div class="appbar-actions">
+      <!-- Storage chip -->
+      <div class="storage-chip" id="mobileStorageChip" title="NAS Storage Space">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        <span id="mobileStorageText">-- GB free</span>
+      </div>
+
+      <!-- User avatar / Sign-in -->
+      <div id="mobileUserBtn" class="user-chip" onclick="handleUserChipClick()">
+        <span id="mobileUserPlaceholder">Sign In</span>
+        <img id="mobileUserAvatar" src="" alt="User" style="display: none;">
+      </div>
+
+      <!-- Switch to Desktop View Button -->
+      <a href="/?view=desktop" class="desktop-switch-btn" title="Switch to Desktop Version">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      </a>
+    </div>
+  </header>
+
+  <!-- Container Update Notification Banner -->
+  <div id="mobileUpdateBanner" class="mobile-update-banner" style="display: none;">
+    <div class="update-banner-content">
+      <span class="update-icon">🚀</span>
+      <span id="mobileUpdateText">Update available!</span>
+    </div>
+    <div class="update-banner-btns">
+      <button class="btn btn-xs btn-primary" onclick="openUpdateSheet()">Update</button>
+      <button class="btn-icon-xs" onclick="dismissUpdateBanner()">&times;</button>
+    </div>
+  </div>
+
+  <!-- Main Viewports Container -->
+  <main class="mobile-viewport">
+
+    <!-- TAB 1: LIBRARY VIEW -->
+    <section id="tabLibrary" class="mobile-tab-view active">
+      <div class="library-header-bar">
+        <div class="mobile-search-box">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="mobileSearchInput" placeholder="Search games..." oninput="onSearchInput(event)">
+          <button id="mobileSearchClear" class="search-clear-btn" style="display: none;" onclick="clearSearch()">&times;</button>
+        </div>
+
+        <div class="library-action-pills">
+          <button class="pill-btn" onclick="selectAllFilteredGames()">Select All</button>
+          <button class="pill-btn" onclick="deselectAllGames()">Deselect</button>
+          <button class="pill-btn" onclick="refreshLibrary()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <!-- Unauthenticated Prompt -->
+      <div id="mobileAuthPrompt" class="mobile-auth-card" style="display: none;">
+        <div class="auth-card-icon">📱</div>
+        <h3>Connect Your Steam Account</h3>
+        <p>Scan the Steam Guard QR code to view your library and download games directly to your NAS.</p>
+        <button class="btn btn-primary btn-block" onclick="openQrModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Steam Guard QR Login
+        </button>
+      </div>
+
+      <!-- Library Loading -->
+      <div id="mobileLibraryLoading" class="mobile-loading-state" style="display: none;">
+        <div class="spinner"></div>
+        <p>Loading your Steam library...</p>
+      </div>
+
+      <!-- Library Empty -->
+      <div id="mobileLibraryEmpty" class="mobile-empty-state" style="display: none;">
+        <span class="empty-icon">🎮</span>
+        <p id="mobileLibraryEmptyMsg">No games found.</p>
+      </div>
+
+      <!-- Games Grid -->
+      <div id="mobileGamesGrid" class="mobile-games-grid"></div>
+    </section>
+
+    <!-- TAB 2: QUEUE VIEW -->
+    <section id="tabQueue" class="mobile-tab-view">
+      <!-- Active Download Card -->
+      <div class="mobile-card" id="mobileActiveCard">
+        <div class="card-header-flex">
+          <div class="active-badge animate-pulse">● Downloading</div>
+          <span id="mobileActiveAppId" class="badge-subtle">AppID: --</span>
+        </div>
+        <h2 id="mobileActiveTitle" class="mobile-active-title">No Active Download</h2>
+
+        <!-- Progress Bar -->
+        <div class="mobile-progress-wrapper">
+          <div class="mobile-progress-bar">
+            <div id="mobileActiveFill" class="progress-fill" style="width: 0%;"></div>
+          </div>
+          <div class="progress-pct-row">
+            <span id="mobileActiveStep" class="active-step-text">Idle</span>
+            <span id="mobileActivePct" class="active-pct-text">0.0%</span>
+          </div>
+        </div>
+
+        <!-- Telemetry Stats Grid -->
+        <div class="mobile-telemetry-grid">
+          <div class="telem-item">
+            <span class="telem-label">Speed</span>
+            <span id="mobileActiveSpeed" class="telem-val">0.0 MB/s</span>
+          </div>
+          <div class="telem-item">
+            <span class="telem-label">ETA</span>
+            <span id="mobileActiveEta" class="telem-val">--</span>
+          </div>
+          <div class="telem-item">
+            <span class="telem-label">Downloaded</span>
+            <span id="mobileActiveBytes" class="telem-val">0 MB / 0 MB</span>
+          </div>
+        </div>
+
+        <div class="active-card-btns">
+          <button class="btn btn-sm btn-outline" onclick="switchToConsoleTab()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            Console Logs
+          </button>
+          <button id="mobileCancelBtn" class="btn btn-sm btn-danger" onclick="cancelActiveDownload()" style="display: none;">
+            Cancel
+          </button>
+        </div>
+      </div>
+
+      <!-- Pending Queue List -->
+      <div class="queue-section-header">
+        <h3>Pending Queue (<span id="mobilePendingCount">0</span>)</h3>
+      </div>
+      <div id="mobilePendingList" class="mobile-queue-list">
+        <p class="empty-hint">No downloads pending.</p>
+      </div>
+
+      <!-- Completed Downloads List -->
+      <div class="queue-section-header" style="margin-top: 20px;">
+        <h3>History & Completed (<span id="mobileHistoryCount">0</span>)</h3>
+        <button class="btn-text-xs" onclick="clearCompletedQueue()">Clear</button>
+      </div>
+      <div id="mobileHistoryList" class="mobile-queue-list">
+        <p class="empty-hint">No completed downloads yet.</p>
+      </div>
+    </section>
+
+    <!-- TAB 3: CONSOLE LOGS VIEW -->
+    <section id="tabConsole" class="mobile-tab-view">
+      <div class="console-header-bar">
+        <div class="console-title-group">
+          <span class="pulse-dot"></span>
+          <h3>SteamCMD Live Output</h3>
+        </div>
+        <div class="console-actions">
+          <button id="mobileAutoScrollBtn" class="btn btn-xs btn-outline" onclick="toggleAutoScroll()">Auto-scroll: ON</button>
+          <button class="btn btn-xs btn-outline" onclick="clearConsoleView()">Clear</button>
+        </div>
+      </div>
+      <div class="mobile-terminal-wrapper">
+        <pre id="mobileTerminalOutput" class="mobile-terminal-log">Waiting for SteamCMD activity...</pre>
+      </div>
+    </section>
+
+    <!-- TAB 4: SETTINGS VIEW -->
+    <section id="tabSettings" class="mobile-tab-view">
+      <form id="mobileSettingsForm" onsubmit="saveMobileSettings(event)">
+        <!-- Steam Credentials & Auth -->
+        <div class="settings-group-card">
+          <h4>SteamCMD Account</h4>
+          <div class="mobile-form-group">
+            <label for="mCfgUsername">Username</label>
+            <input type="text" id="mCfgUsername" placeholder="Steam username">
+          </div>
+          <div class="mobile-form-group">
+            <label for="mCfgPassword">Password</label>
+            <input type="password" id="mCfgPassword" placeholder="Stored securely on NAS">
+          </div>
+          <small class="form-hint">Required for downloading commercial games you own.</small>
+
+          <!-- Machine Authorization Status Card -->
+          <div class="auth-status-card" style="margin-top: 12px; padding: 12px; background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+              <div>
+                <div style="font-size: 13px; font-weight: 600;">Machine Authorization:</div>
+                <span id="mCfgAuthBadge" class="badge-subtle">Checking...</span>
+              </div>
+              <button type="button" class="btn btn-xs btn-outline" onclick="openDeviceAuthFromSettings()">Authorize</button>
+            </div>
+            <small class="form-hint" style="margin-top: 6px; display: block;">Once authorized, downloads run with zero mobile 2FA notifications.</small>
+          </div>
+        </div>
+
+        <!-- Download & Platform Options -->
+        <div class="settings-group-card">
+          <h4>Download Options</h4>
+          <div class="mobile-form-group">
+            <label for="mCfgPlatform">Target Platform</label>
+            <select id="mCfgPlatform">
+              <option value="windows">Windows (Recommended for NAS / Proton)</option>
+              <option value="linux">Linux (Native depots)</option>
+              <option value="macos">macOS</option>
+            </select>
+          </div>
+
+          <div class="mobile-checkbox-row">
+            <input type="checkbox" id="mCfgValidate" checked>
+            <label for="mCfgValidate">Validate files after download (<code>validate</code>)</label>
+          </div>
+
+          <div class="mobile-checkbox-row" style="margin-top: 10px;">
+            <input type="checkbox" id="mCfgGoldberg">
+            <label for="mCfgGoldberg">Auto-apply Goldberg offline wrapper</label>
+          </div>
+          <small class="form-hint">Enables offline play for supported games (games that don't use it are automatically skipped).</small>
+        </div>
+
+        <!-- Steam API Key -->
+        <div class="settings-group-card">
+          <h4>Steam Web API (Optional)</h4>
+          <div class="mobile-form-group">
+            <label for="mCfgApiKey">Web API Key</label>
+            <input type="text" id="mCfgApiKey" placeholder="32-character key">
+          </div>
+          <small class="form-hint">Needed if your Steam profile games list is set to Friends-Only or Private.</small>
+        </div>
+
+        <!-- NAS Environment Info -->
+        <div class="settings-group-card">
+          <h4>Container & NAS Storage</h4>
+          <div class="mobile-sysinfo">
+            <div><span>PUID / PGID:</span> <strong id="mSysPuidPgid">1000 / 1000</strong></div>
+            <div><span>Downloads:</span> <code id="mSysDownDir">/downloads</code></div>
+            <div><span>App Data:</span> <code id="mSysDataDir">/app/data</code></div>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="settings-actions-card">
+          <button type="submit" class="btn btn-primary btn-block">Save Settings</button>
+          <a href="/?view=desktop" class="btn btn-outline btn-block" style="margin-top: 10px; text-decoration: none; text-align: center;">
+            🖥️ Switch to Desktop Version
+          </a>
+        </div>
+      </form>
+    </section>
+
+  </main>
+
+  <!-- Floating Sticky Action Sheet for Batch Downloads -->
+  <div id="mobileBatchSheet" class="mobile-batch-sheet" style="display: none;">
+    <div class="batch-sheet-header">
+      <div class="batch-count-info">
+        <span class="batch-count-num" id="mBatchCount">0</span>
+        <span class="batch-count-label">games selected</span>
+      </div>
+      <label class="batch-goldberg-pill" title="Automatically apply Goldberg offline wrapper to supported games">
+        <input type="checkbox" id="mBatchGoldberg">
+        <span>Auto-Goldberg</span>
+      </label>
+    </div>
+
+    <div class="batch-sheet-btns">
+      <button class="btn btn-sm btn-secondary" onclick="deselectAllGames()">Clear</button>
+      <button class="btn btn-sm btn-primary flex-1" onclick="queueSelectedGamesMobile()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download to NAS
+      </button>
+    </div>
+  </div>
+
+  <!-- Bottom Navigation Bar (Android Material 3 Navigation) -->
+  <nav class="mobile-bottom-nav">
+    <button class="nav-tab active" onclick="switchMobileTab('tabLibrary')">
+      <div class="nav-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 12h4M8 10v4M15 11h.01M18 13h.01"/></svg>
+      </div>
+      <span class="nav-label">Library</span>
+    </button>
+
+    <button class="nav-tab" onclick="switchMobileTab('tabQueue')">
+      <div class="nav-icon has-badge">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span id="mobileQueueNavBadge" class="nav-badge" style="display: none;">0</span>
+      </div>
+      <span class="nav-label">Queue</span>
+    </button>
+
+    <button class="nav-tab" onclick="switchMobileTab('tabConsole')">
+      <div class="nav-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+      </div>
+      <span class="nav-label">Console</span>
+    </button>
+
+    <button class="nav-tab" onclick="switchMobileTab('tabSettings')">
+      <div class="nav-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </div>
+      <span class="nav-label">Settings</span>
+    </button>
+  </nav>
+
+  <!-- Mobile Bottom Sheet / Modal: Steam Guard QR Login -->
+  <div id="mobileQrModal" class="mobile-modal-backdrop" style="display: none;" onclick="if(event.target === this) closeQrModal()">
+    <div class="mobile-bottom-sheet">
+      <div class="sheet-drag-handle"></div>
+      <div class="sheet-header">
+        <h3>Steam Guard QR Login</h3>
+        <button class="sheet-close-btn" onclick="closeQrModal()">&times;</button>
+      </div>
+
+      <!-- Stage 1: QR Display -->
+      <div id="mQrScanStage">
+        <p class="sheet-sub">Scan once with the Steam Mobile app on your phone to connect.</p>
+        <div class="mobile-qr-wrapper">
+          <div id="mQrLoading" class="mobile-qr-spinner">
+            <div class="spinner"></div>
+            <p>Generating challenge...</p>
+          </div>
+          <img id="mQrImg" src="" alt="Steam Guard QR" style="display: none;">
+        </div>
+
+        <div class="qr-status-indicator">
+          <span class="pulse-dot"></span>
+          <span id="mQrStatusText">Waiting for mobile approval...</span>
+        </div>
+
+        <div class="sheet-btns">
+          <button class="btn btn-secondary btn-block" onclick="startQrSession()">Refresh QR Code</button>
+        </div>
+      </div>
+
+      <!-- Stage 2: Password Input -->
+      <div id="mQrPassStage" style="display: none;">
+        <div class="verified-chip">✓ Steam Guard Confirmed!</div>
+        <p class="sheet-sub">Enter your password once to authorize SteamCMD to download your games to your NAS.</p>
+
+        <form onsubmit="submitOneTimePasswordMobile(event)">
+          <div class="mobile-form-group">
+            <label for="mOneTimePass">Steam Password</label>
+            <input type="password" id="mOneTimePass" placeholder="Enter password" required autocomplete="current-password">
+          </div>
+          <div class="sheet-btns" style="margin-top: 14px;">
+            <button type="button" class="btn btn-secondary" onclick="skipPasswordMobile()">Skip</button>
+            <button type="submit" class="btn btn-primary flex-1">Save & Authorize</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Stage 3: Device Authorization Status -->
+      <div id="mQrAuthStage" style="display: none;">
+        <div class="verified-chip">🔑 Machine Authorization</div>
+        <p id="mAuthStageMsg" class="sheet-sub">Please approve the login prompt in your Steam Mobile app.</p>
+
+        <div id="mAuthCodeGroup" style="display: none; margin-top: 10px;">
+          <label style="font-size: 12px; font-weight: 600;">Steam Guard Code</label>
+          <div style="display: flex; gap: 8px; margin-top: 4px;">
+            <input type="text" id="mAuthCodeInput" placeholder="Code" maxlength="10" style="flex: 1; text-transform: uppercase;">
+            <button type="button" class="btn btn-primary btn-sm" onclick="submitAuthCodeMobile()">Submit</button>
+          </div>
+        </div>
+
+        <div class="qr-status-indicator" style="margin-top: 14px;">
+          <span class="pulse-dot"></span>
+          <span id="mAuthLogText">Connecting to Steam...</span>
+        </div>
+
+        <div class="sheet-btns" style="margin-top: 14px;">
+          <button type="button" class="btn btn-primary btn-block" onclick="closeQrModal()">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile Bottom Sheet: User Profile / Logout -->
+  <div id="mobileProfileModal" class="mobile-modal-backdrop" style="display: none;" onclick="if(event.target === this) closeProfileModal()">
+    <div class="mobile-bottom-sheet">
+      <div class="sheet-drag-handle"></div>
+      <div class="sheet-header">
+        <h3>Steam Account</h3>
+        <button class="sheet-close-btn" onclick="closeProfileModal()">&times;</button>
+      </div>
+      <div class="profile-sheet-body">
+        <img id="mProfileAvatar" src="" class="profile-sheet-avatar">
+        <h4 id="mProfileName">Steam User</h4>
+        <p id="mProfileId" class="sheet-sub">ID: --</p>
+        <button class="btn btn-danger btn-block" onclick="logoutMobile()" style="margin-top: 16px;">
+          Log Out of Steam
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile Bottom Sheet: Update Container -->
+  <div id="mobileUpdateSheet" class="mobile-modal-backdrop" style="display: none;" onclick="if(event.target === this) closeUpdateSheet()">
+    <div class="mobile-bottom-sheet">
+      <div class="sheet-drag-handle"></div>
+      <div class="sheet-header">
+        <h3>🚀 VaporFetch Update</h3>
+        <button class="sheet-close-btn" onclick="closeUpdateSheet()">&times;</button>
+      </div>
+      <div class="update-sheet-body">
+        <div class="update-ver-row">
+          <span>Current: <code id="mUpdCurVer">v1.0.0</code></span>
+          <span>&rarr;</span>
+          <span>Latest: <strong id="mUpdLatestVer" style="color: #38bdf8;">--</strong></span>
+        </div>
+        <p id="mUpdCommitMsg" style="margin-top: 10px; font-size: 13px;">Latest updates and improvements</p>
+
+        <div id="mUpdAutoSec" style="display: none; margin-top: 14px;">
+          <button class="btn btn-primary btn-block" onclick="triggerMobileUpdate()">
+            🚀 1-Click Update Container Now
+          </button>
+        </div>
+        <div id="mUpdManualSec" style="display: none; margin-top: 14px;">
+          <small class="form-hint">Run via SSH on your NAS:</small>
+          <code class="copyable-code">docker compose pull && docker compose up -d</code>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile Toast Container -->
+  <div id="mobileToastContainer" class="mobile-toast-container"></div>
+
+  <script src="/static/mobile.js"></script>
+</body>
+</html>

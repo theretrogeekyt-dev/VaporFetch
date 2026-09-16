@@ -88,12 +88,22 @@ async function fetchSystemStatus() {
     const data = await res.json();
 
     const disk = data.disk || {};
-    const freeGB = (disk.free_bytes / (1024 ** 3)).toFixed(1);
-    const totalGB = (disk.total_bytes / (1024 ** 3)).toFixed(1);
+    const freeBytes = disk.free_bytes || 0;
+    const totalBytes = disk.total_bytes || 0;
+    const freeGB = freeBytes / (1024 ** 3);
+    const totalGB = totalBytes / (1024 ** 3);
 
     const storageText = document.getElementById("mobileStorageText");
+    const storageChip = document.getElementById("mobileStorageChip");
     if (storageText) {
-      storageText.textContent = `${freeGB} GB free`;
+      if (freeGB >= 1000) {
+        storageText.textContent = `${(freeGB / 1024).toFixed(1)} TB free`;
+      } else {
+        storageText.textContent = `${freeGB.toFixed(1)} GB free`;
+      }
+    }
+    if (storageChip) {
+      storageChip.title = `NAS Storage: ${freeGB.toFixed(1)} GB free of ${totalGB.toFixed(1)} GB total`;
     }
 
     const puidEl = document.getElementById("mSysPuidPgid");
@@ -127,34 +137,42 @@ async function checkAuthSession() {
 }
 
 function renderAuthenticatedUser(session) {
-  const userPlaceholder = document.getElementById("mobileUserPlaceholder");
+  const loginBtn = document.getElementById("mobileLoginBtn");
+  const userCard = document.getElementById("mobileUserCard");
   const userAvatar = document.getElementById("mobileUserAvatar");
+  const userName = document.getElementById("mobileUserName");
   const authPrompt = document.getElementById("mobileAuthPrompt");
+  const libraryToolbar = document.getElementById("mobileLibraryToolbar");
 
-  if (userPlaceholder) userPlaceholder.style.display = "none";
+  if (loginBtn) loginBtn.style.display = "none";
+  if (userCard) userCard.style.display = "flex";
   if (userAvatar) {
     userAvatar.src = session.avatar || "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22%2338bdf8%22><circle cx=%2212%22 cy=%2212%22 r=%2210%22/></svg>";
-    userAvatar.style.display = "block";
   }
+  if (userName) {
+    userName.textContent = session.personaname || session.account_name || "Steam User";
+  }
+
   if (authPrompt) authPrompt.style.display = "none";
+  if (libraryToolbar) libraryToolbar.style.display = "block";
 }
 
 function renderUnauthenticatedUser() {
-  const userPlaceholder = document.getElementById("mobileUserPlaceholder");
-  const userAvatar = document.getElementById("mobileUserAvatar");
+  const loginBtn = document.getElementById("mobileLoginBtn");
+  const userCard = document.getElementById("mobileUserCard");
   const authPrompt = document.getElementById("mobileAuthPrompt");
+  const libraryToolbar = document.getElementById("mobileLibraryToolbar");
   const gamesGrid = document.getElementById("mobileGamesGrid");
-
-  if (userPlaceholder) {
-    userPlaceholder.textContent = "Sign In";
-    userPlaceholder.style.display = "inline";
-  }
-  if (userAvatar) userAvatar.style.display = "none";
-  if (authPrompt) authPrompt.style.display = "block";
-  if (gamesGrid) gamesGrid.innerHTML = "";
-
   const loading = document.getElementById("mobileLibraryLoading");
+  const empty = document.getElementById("mobileLibraryEmpty");
+
+  if (loginBtn) loginBtn.style.display = "inline-flex";
+  if (userCard) userCard.style.display = "none";
+  if (authPrompt) authPrompt.style.display = "block";
+  if (libraryToolbar) libraryToolbar.style.display = "none";
+  if (gamesGrid) gamesGrid.innerHTML = "";
   if (loading) loading.style.display = "none";
+  if (empty) empty.style.display = "none";
 }
 
 function handleUserChipClick() {

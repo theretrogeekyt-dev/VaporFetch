@@ -12,34 +12,51 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/mobile.css">
 </head>
 <body>
 
   <!-- Top Mobile App Bar -->
   <header class="mobile-appbar">
-    <div class="appbar-brand">
-      <div class="brand-icon">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12c0 4.84 3.44 8.87 8 9.8V15.2l-2.4-1.2v-.03c-.34-.17-.6-.46-.73-.83L2.24 11.2C2.08 11.46 2 11.72 2 12c0 5.52 4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm3.3 14.1c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
-      </div>
-      <span class="brand-text">VaporFetch</span>
+    <div class="logo">
+      <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
+        <path d="M2 12h20"/>
+      </svg>
+      <span class="logo-title">VaporFetch</span>
+      <span class="badge badge-nas">NAS</span>
     </div>
 
     <div class="appbar-actions">
       <!-- Storage chip -->
-      <div class="storage-chip" id="mobileStorageChip" title="NAS Storage Space">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
-        <span id="mobileStorageText">-- GB free</span>
+      <div class="storage-chip" id="mobileStorageChip" title="Mounted NAS /downloads storage">
+        <svg class="chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="3" width="20" height="7" rx="2"/>
+          <rect x="2" y="14" width="20" height="7" rx="2"/>
+          <line x1="6" y1="6.5" x2="6.01" y2="6.5"/>
+          <line x1="6" y1="17.5" x2="6.01" y2="17.5"/>
+        </svg>
+        <span id="mobileStorageText">-- TB free</span>
       </div>
 
-      <!-- User avatar / Sign-in -->
-      <div id="mobileUserBtn" class="user-chip" onclick="handleUserChipClick()">
-        <span id="mobileUserPlaceholder">Sign In</span>
-        <img id="mobileUserAvatar" src="" alt="User" style="display: none;">
+      <!-- Steam Sign-in Button -->
+      <button id="mobileLoginBtn" class="btn btn-steam btn-xs" onclick="openQrModal()" title="Log in with Steam Guard">
+        <svg class="steam-icon" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2C6.48 2 2 6.48 2 12c0 4.84 3.44 8.87 8 9.8V15.2l-2.4-1.2v-.03c-.34-.17-.6-.46-.73-.83L2.24 11.2C2.08 11.46 2 11.72 2 12c0 5.52 4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm3.3 14.1c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+        </svg>
+        <span>Sign In</span>
+      </button>
+
+      <!-- Authenticated User Chip -->
+      <div id="mobileUserCard" class="user-chip" onclick="handleUserChipClick()" style="display: none;">
+        <img id="mobileUserAvatar" class="user-avatar-sm" src="" alt="Avatar">
+        <span id="mobileUserName" class="user-name-sm">Steam User</span>
       </div>
 
-      <!-- Switch to Desktop View Button -->
-      <a href="/?view=desktop" class="desktop-switch-btn" title="Switch to Desktop Version">
+      <!-- Switch to Full Desktop UI Button -->
+      <a href="/?view=desktop" class="icon-btn" title="Switch to Full Desktop UI">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
       </a>
     </div>
@@ -62,31 +79,34 @@
 
     <!-- TAB 1: LIBRARY VIEW -->
     <section id="tabLibrary" class="mobile-tab-view active">
-      <div class="library-header-bar">
-        <div class="mobile-search-box">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" id="mobileSearchInput" placeholder="Search games..." oninput="onSearchInput(event)">
-          <button id="mobileSearchClear" class="search-clear-btn" style="display: none;" onclick="clearSearch()">&times;</button>
+      <!-- Library Toolbar (Shown only when authenticated) -->
+      <div id="mobileLibraryToolbar" class="library-header-bar" style="display: none;">
+        <div class="search-box">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="mobileSearchInput" placeholder="Search games by title or AppID..." oninput="onSearchInput(event)">
+          <button id="mobileSearchClear" class="clear-btn" style="display: none;" onclick="clearSearch()">&times;</button>
         </div>
 
         <div class="library-action-pills">
-          <button class="pill-btn" onclick="selectAllFilteredGames()">Select All</button>
-          <button class="pill-btn" onclick="deselectAllGames()">Deselect</button>
-          <button class="pill-btn" onclick="refreshLibrary()">
+          <button class="btn btn-secondary btn-xs" onclick="selectAllFilteredGames()">Select All</button>
+          <button class="btn btn-secondary btn-xs" onclick="deselectAllGames()">Deselect</button>
+          <button class="btn btn-secondary btn-xs" onclick="refreshLibrary()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
             Refresh
           </button>
         </div>
       </div>
 
-      <!-- Unauthenticated Prompt -->
-      <div id="mobileAuthPrompt" class="mobile-auth-card" style="display: none;">
-        <div class="auth-card-icon">📱</div>
-        <h3>Connect Your Steam Account</h3>
-        <p>Scan the Steam Guard QR code to view your library and download games directly to your NAS.</p>
-        <button class="btn btn-primary btn-block" onclick="openQrModal()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-          Steam Guard QR Login
+      <!-- Unauthenticated Placeholder (Matching Desktop) -->
+      <div id="mobileAuthPrompt" class="placeholder-card" style="display: none;">
+        <div class="placeholder-icon">🔑</div>
+        <h2>Steam Authentication Required</h2>
+        <p>Log in using modern Steam Guard QR code authentication to automatically browse and batch-download your games library.</p>
+        <button class="btn btn-steam btn-large btn-block" onclick="openQrModal()">
+          <svg class="steam-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12c0 4.84 3.44 8.87 8 9.8V15.2l-2.4-1.2v-.03c-.34-.17-.6-.46-.73-.83L2.24 11.2C2.08 11.46 2 11.72 2 12c0 5.52 4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm3.3 14.1c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+          </svg>
+          <span>Scan Steam Guard QR Code</span>
         </button>
       </div>
 
@@ -300,7 +320,7 @@
   <nav class="mobile-bottom-nav">
     <button class="nav-tab active" onclick="switchMobileTab('tabLibrary')">
       <div class="nav-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 12h4M8 10v4M15 11h.01M18 13h.01"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
       </div>
       <span class="nav-label">Library</span>
     </button>

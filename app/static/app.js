@@ -9,9 +9,40 @@ let qrPollTimer = null;
 let sseConnection = null;
 let uiMode = "desktop";
 
+function isMobileClient() {
+  const ua = (navigator.userAgent || "").toLowerCase();
+  const hasMobileUa = /(android|iphone|ipad|ipod|mobile|blackberry|windows phone)/.test(ua);
+  const hasCoarsePointer = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+  const isSmallViewport = window.matchMedia && window.matchMedia("(max-width: 1024px)").matches;
+  return hasMobileUa || (hasCoarsePointer && isSmallViewport);
+}
+
 function resolveUiMode() {
+  const params = new URLSearchParams(window.location.search);
+  const modeParam = params.get("mode");
+  if (modeParam === "desktop") return "desktop";
   if (window.location.pathname.startsWith("/mobile")) return "mobile";
+  if (modeParam === "mobile") return "mobile";
+  if (isMobileClient()) return "mobile";
   return "desktop";
+}
+
+function redirectToMobileEntryIfNeeded() {
+  const params = new URLSearchParams(window.location.search);
+  const modeParam = params.get("mode");
+  const onMobileRoute = window.location.pathname.startsWith("/mobile");
+  if (onMobileRoute || modeParam === "desktop" || !isMobileClient()) return false;
+
+  params.delete("mode");
+  const query = params.toString();
+  const target = query ? `/mobile?${query}` : "/mobile";
+  const current = `${window.location.pathname}${window.location.search}`;
+
+  if (current !== target) {
+    window.location.replace(target);
+    return true;
+  }
+  return false;
 }
 
 function applyUiMode() {
@@ -48,6 +79,7 @@ function applyUiMode() {
 
 // Initialization
 document.addEventListener("DOMContentLoaded", () => {
+  if (redirectToMobileEntryIfNeeded()) return;
   applyUiMode();
   checkAuthSession();
   fetchSystemStatus();

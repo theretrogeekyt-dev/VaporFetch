@@ -1745,10 +1745,6 @@ body.mobile-mode .active-actions {
   gap: 8px;
 }
 
-body.mobile-mode .active-actions .btn {
-  flex: 1;
-}
-
 body.mobile-mode .progress-stats {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
@@ -1775,8 +1771,8 @@ body.mobile-mode .batch-bar-btns {
 }
 
 body.mobile-mode .batch-bar-btns .btn {
-  flex: 1;
   min-height: 44px;
+  min-width: 132px;
 }
 
 body.mobile-mode .tab-btn,

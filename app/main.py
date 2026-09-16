@@ -3,7 +3,7 @@ import shutil
 import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Literal
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -96,7 +96,7 @@ def _build_mobile_redirect_url(request: Request) -> str:
 
 
 @app.get("/", response_class=HTMLResponse)
-async def serve_index(request: Request, mode: Optional[str] = None):
+async def serve_index(request: Request, mode: Optional[Literal["desktop", "mobile"]] = None):
     if mode == "mobile":
         return RedirectResponse(url=_build_mobile_redirect_url(request), status_code=302)
     if mode != "desktop" and _is_mobile_request(request):

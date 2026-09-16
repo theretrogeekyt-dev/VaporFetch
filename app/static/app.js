@@ -10,11 +10,17 @@ let sseConnection = null;
 let uiMode = "desktop";
 
 function isMobileClient() {
+  if (navigator.userAgentData && typeof navigator.userAgentData.mobile === "boolean") {
+    if (navigator.userAgentData.mobile) return true;
+  }
+
   const ua = (navigator.userAgent || "").toLowerCase();
   const hasMobileUa = /(android|iphone|ipad|ipod|mobile|blackberry|windows phone)/.test(ua);
   const hasCoarsePointer = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
-  const isSmallViewport = window.matchMedia && window.matchMedia("(max-width: 1024px)").matches;
-  return hasMobileUa || (hasCoarsePointer && isSmallViewport);
+  const maxTouchPoints = Number(navigator.maxTouchPoints || 0);
+  const hasTouch = maxTouchPoints > 1;
+  const isSmallViewport = window.matchMedia && window.matchMedia("(max-width: 1280px)").matches;
+  return hasMobileUa || (isSmallViewport && (hasCoarsePointer || hasTouch));
 }
 
 function resolveUiMode() {

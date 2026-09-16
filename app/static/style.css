@@ -191,6 +191,12 @@ body {
   background: var(--bg-surface);
 }
 
+.mode-switch-link[aria-current="page"] {
+  color: #fff;
+  background: var(--bg-surface);
+  border-color: var(--text-dim);
+}
+
 /* Storage Widget */
 .storage-widget {
   display: flex;
@@ -1780,4 +1786,3 @@ body.mobile-mode .mode-switch-link,
 body.mobile-mode .logout-btn {
   min-height: 42px;
 }
-

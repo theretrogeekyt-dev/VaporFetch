@@ -20,8 +20,30 @@ function applyUiMode() {
 
   const mobileLink = document.getElementById("mobileModeLink");
   const desktopLink = document.getElementById("desktopModeLink");
-  if (mobileLink) mobileLink.style.display = uiMode === "mobile" ? "none" : "inline-flex";
-  if (desktopLink) desktopLink.style.display = uiMode === "mobile" ? "inline-flex" : "none";
+  const sharedParams = new URLSearchParams(window.location.search);
+  sharedParams.delete("mode");
+  const sharedQuery = sharedParams.toString();
+  const mobileHref = sharedQuery ? `/mobile?${sharedQuery}` : "/mobile";
+  const desktopParams = new URLSearchParams(sharedParams);
+  desktopParams.set("mode", "desktop");
+  const desktopHref = `/?${desktopParams.toString()}`;
+
+  if (mobileLink) {
+    mobileLink.href = mobileHref;
+    if (uiMode === "mobile") {
+      mobileLink.setAttribute("aria-current", "page");
+    } else {
+      mobileLink.removeAttribute("aria-current");
+    }
+  }
+  if (desktopLink) {
+    desktopLink.href = desktopHref;
+    if (uiMode === "desktop") {
+      desktopLink.setAttribute("aria-current", "page");
+    } else {
+      desktopLink.removeAttribute("aria-current");
+    }
+  }
 }
 
 // Initialization

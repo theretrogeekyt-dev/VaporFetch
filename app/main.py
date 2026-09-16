@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -87,12 +88,19 @@ def _is_mobile_request(request: Request) -> bool:
     return any(hint in user_agent for hint in MOBILE_USER_AGENT_HINTS)
 
 
+def _build_mobile_redirect_url(request: Request) -> str:
+    params = [(k, v) for k, v in request.query_params.multi_items() if k != "mode"]
+    if not params:
+        return "/mobile"
+    return f"/mobile?{urlencode(params, doseq=True)}"
+
+
 @app.get("/", response_class=HTMLResponse)
 async def serve_index(request: Request, mode: Optional[str] = None):
     if mode == "mobile":
-        return RedirectResponse(url="/mobile", status_code=302)
+        return RedirectResponse(url=_build_mobile_redirect_url(request), status_code=302)
     if mode != "desktop" and _is_mobile_request(request):
-        return RedirectResponse(url="/mobile", status_code=302)
+        return RedirectResponse(url=_build_mobile_redirect_url(request), status_code=302)
     return HTMLResponse(content=_load_web_ui_html())
 
 

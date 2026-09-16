@@ -7,86 +7,9 @@ let selectedGames = new Map(); // appid -> {appid, name}
 let activeDownloadItem = null;
 let qrPollTimer = null;
 let sseConnection = null;
-let uiMode = "desktop";
-
-function isMobileClient() {
-  if (navigator.userAgentData && typeof navigator.userAgentData.mobile === "boolean") {
-    if (navigator.userAgentData.mobile) return true;
-  }
-
-  const ua = (navigator.userAgent || "").toLowerCase();
-  const hasMobileUa = /(android|iphone|ipad|ipod|mobile|blackberry|windows phone)/.test(ua);
-  const hasCoarsePointer = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
-  const maxTouchPoints = Number(navigator.maxTouchPoints || 0);
-  const hasTouch = maxTouchPoints > 1;
-  const isSmallViewport = window.matchMedia && window.matchMedia("(max-width: 1280px)").matches;
-  return hasMobileUa || (isSmallViewport && (hasCoarsePointer || hasTouch));
-}
-
-function resolveUiMode() {
-  const params = new URLSearchParams(window.location.search);
-  const modeParam = params.get("mode");
-  if (modeParam === "desktop") return "desktop";
-  if (window.location.pathname.startsWith("/mobile")) return "mobile";
-  if (modeParam === "mobile") return "mobile";
-  if (isMobileClient()) return "mobile";
-  return "desktop";
-}
-
-function redirectToMobileEntryIfNeeded() {
-  const params = new URLSearchParams(window.location.search);
-  const modeParam = params.get("mode");
-  const onMobileRoute = window.location.pathname.startsWith("/mobile");
-  if (onMobileRoute || modeParam === "desktop" || !isMobileClient()) return false;
-
-  params.delete("mode");
-  const query = params.toString();
-  const target = query ? `/mobile?${query}` : "/mobile";
-  const current = `${window.location.pathname}${window.location.search}`;
-
-  if (current !== target) {
-    window.location.replace(target);
-    return true;
-  }
-  return false;
-}
-
-function applyUiMode() {
-  uiMode = resolveUiMode();
-  document.body.classList.toggle("mobile-mode", uiMode === "mobile");
-
-  const mobileLink = document.getElementById("mobileModeLink");
-  const desktopLink = document.getElementById("desktopModeLink");
-  const sharedParams = new URLSearchParams(window.location.search);
-  sharedParams.delete("mode");
-  const sharedQuery = sharedParams.toString();
-  const mobileHref = sharedQuery ? `/mobile?${sharedQuery}` : "/mobile";
-  const desktopParams = new URLSearchParams(sharedParams);
-  desktopParams.set("mode", "desktop");
-  const desktopHref = `/?${desktopParams.toString()}`;
-
-  if (mobileLink) {
-    mobileLink.href = mobileHref;
-    if (uiMode === "mobile") {
-      mobileLink.setAttribute("aria-current", "page");
-    } else {
-      mobileLink.removeAttribute("aria-current");
-    }
-  }
-  if (desktopLink) {
-    desktopLink.href = desktopHref;
-    if (uiMode === "desktop") {
-      desktopLink.setAttribute("aria-current", "page");
-    } else {
-      desktopLink.removeAttribute("aria-current");
-    }
-  }
-}
 
 // Initialization
 document.addEventListener("DOMContentLoaded", () => {
-  if (redirectToMobileEntryIfNeeded()) return;
-  applyUiMode();
   checkAuthSession();
   fetchSystemStatus();
   initSSE();

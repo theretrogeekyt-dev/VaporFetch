@@ -49,8 +49,6 @@ You do **NOT** need to clone the repository or build from source. A pre-built, a
    ```
 
 4. Open **`http://<nas-ip>:8080`** in your web browser.
-   - Desktop/standard UI: `http://<nas-ip>:8080/?mode=desktop`
-   - Dedicated mobile UI mode: `http://<nas-ip>:8080/mobile` (mobile devices are auto-routed here by default)
 
 ---
 

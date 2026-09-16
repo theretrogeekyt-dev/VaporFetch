@@ -17,6 +17,12 @@ services:
       - STEAM_API_KEY=
       # Default platform: "windows" (recommended for NAS/Proton storage) or "linux"
       - FORCE_PLATFORM=windows
+      # Optional update/deployment channel:
+      # - UPDATE_CHANNEL=main                      # Branch used for update checks (default: main)
+      # - UPDATE_IMAGE_TAG=latest                  # Override image tag used for 1-click updates
+      # Example branch channel:
+      # - UPDATE_CHANNEL=copilot/add-mobile-friendly-web-ui
+      # - UPDATE_IMAGE_TAG=copilot-add-mobile-friendly-web-ui
     volumes:
       # Persistent configuration, sessions, and Steam cache
       - ./data:/app/data

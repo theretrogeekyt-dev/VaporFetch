@@ -36,6 +36,8 @@ You do **NOT** need to clone the repository or build from source. A pre-built, a
          - UMASK=002                  # Ensures group-writable permissions
          - STEAM_API_KEY=             # Optional: https://steamcommunity.com/dev/apikey
          - FORCE_PLATFORM=windows     # Download Windows game depots on Linux NAS
+         - UPDATE_CHANNEL=main        # Optional branch channel for update checks
+         - UPDATE_IMAGE_TAG=latest    # Optional image tag for 1-click in-app updates
        volumes:
          - ./data:/app/data           # Stores settings, sessions & Steam cache
          - /mnt/storage/games:/downloads  # Mount path to your NAS share
@@ -89,9 +91,9 @@ docker run -d \
 ## 🔄 Automated Updates via GitHub Actions
 
 VaporFetch includes an automated GitHub Actions CI/CD pipeline (`.github/workflows/docker-publish.yml`). 
-Whenever new commits are pushed to the `main` branch, the workflow:
+Whenever new commits are pushed to any branch, the workflow:
 1. Builds a fresh, verified Docker image with Debian bookworm, SteamCMD, and Python 3.
-2. Publishes the image directly to **GitHub Container Registry** (`ghcr.io/theretrogeekyt-dev/vaporfetch:latest`).
+2. Publishes branch tags to **GitHub Container Registry** (`ghcr.io/theretrogeekyt-dev/vaporfetch:<branch-tag>`) and `latest` for the default branch.
 
 ### How to Update Your Container
 
@@ -209,7 +211,7 @@ When running on systems like **Synology DSM**, **Unraid**, or **TrueNAS SCALE**:
 
 ## 🚀 In-App Container Updates & Startup Notifications
 
-VaporFetch automatically queries the upstream repository on page startup to check if a new commit or release has been published.
+VaporFetch automatically queries the configured update channel on page startup to check if a new commit has been published.
 
 ### How It Works
 1. **Startup Alert Banner**: If an update is detected, a blue notification banner appears at the top of your dashboard displaying the new commit message, short SHA, and an **"Update Now"** button.
@@ -218,6 +220,13 @@ VaporFetch automatically queries the upstream repository on page startup to chec
    - The web interface displays a sleek reconnect countdown screen while the container restarts, then automatically refreshes the page once back online!
 3. **No-Socket Fallback**:
    - If the Docker socket is not mounted, the update modal displays the release changelog and provides a 1-click copyable terminal command (`docker compose pull && docker compose up -d`) so you can update instantly via SSH without navigating Synology Container Manager.
+
+### Optional Branch Channel Configuration
+
+If you want a non-main deployment/update channel (for example a feature branch image):
+- Set `UPDATE_CHANNEL` to the Git branch to monitor for update checks (e.g. `copilot/add-mobile-friendly-web-ui`).
+- Set `UPDATE_IMAGE_TAG` to the published image tag for that branch (e.g. `copilot-add-mobile-friendly-web-ui`).
+- Change your container image tag to match the same branch channel if you want runtime and updater behavior aligned.
 
 ---
 

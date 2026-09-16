@@ -4,15 +4,29 @@ import socket
 import http.client
 import urllib.request
 import asyncio
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional
+from urllib.parse import quote
 
-from app.config import DATA_DIR, APP_VERSION, APP_COMMIT_SHA, DOCKER_SOCKET_PATH
+from app.config import (
+    DATA_DIR,
+    APP_VERSION,
+    APP_COMMIT_SHA,
+    DOCKER_SOCKET_PATH,
+    UPDATE_CHANNEL,
+    UPDATE_IMAGE_TAG,
+)
 
 UPDATE_CACHE_FILE = DATA_DIR / "update_cache.json"
 CACHE_TTL_SECONDS = 3600  # 1 hour cache to avoid GitHub API rate limits
-GITHUB_API_URL = "https://api.github.com/repos/theretrogeekyt-dev/VaporFetch/commits/main"
+
+
+def _sanitize_docker_tag(value: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9._-]+", "-", (value or "").strip().lower())
+    cleaned = cleaned.strip("._-")
+    return cleaned or "latest"
 
 
 class DockerUnixClient:
@@ -126,6 +140,15 @@ class DockerUnixClient:
 class ContainerUpdater:
     def __init__(self):
         self.docker = DockerUnixClient()
+        self.update_channel = UPDATE_CHANNEL
+        self.update_image_tag = UPDATE_IMAGE_TAG or (
+            "latest" if self.update_channel.lower() in ("main", "master")
+            else _sanitize_docker_tag(self.update_channel)
+        )
+        channel_ref = quote(self.update_channel, safe="")
+        channel_ref_for_web = quote(self.update_channel, safe="/")
+        self.github_api_url = f"https://api.github.com/repos/theretrogeekyt-dev/VaporFetch/commits/{channel_ref}"
+        self.channel_commits_url = f"https://github.com/theretrogeekyt-dev/VaporFetch/commits/{channel_ref_for_web}"
 
     def is_docker_socket_available(self) -> bool:
         return self.docker.is_available()
@@ -136,6 +159,10 @@ class ContainerUpdater:
         try:
             with open(UPDATE_CACHE_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                if data.get("update_channel") != self.update_channel:
+                    return None
+                if data.get("image_tag") != self.update_image_tag:
+                    return None
                 cached_at = data.get("cached_at", 0)
                 now = datetime.now(timezone.utc).timestamp()
                 if now - cached_at < CACHE_TTL_SECONDS:
@@ -154,7 +181,7 @@ class ContainerUpdater:
 
     async def check_for_updates(self, force: bool = False) -> Dict[str, Any]:
         """
-        Checks GitHub API for the latest commit on main and compares with current commit.
+        Checks GitHub API for the latest commit on the configured update channel and compares with current commit.
         """
         if not force:
             cached = self._load_cache()
@@ -167,11 +194,11 @@ class ContainerUpdater:
         latest_sha = ""
         commit_message = ""
         commit_date = ""
-        commit_url = "https://github.com/theretrogeekyt-dev/VaporFetch/commits/main"
+        commit_url = self.channel_commits_url
 
         try:
             req = urllib.request.Request(
-                GITHUB_API_URL,
+                self.github_api_url,
                 headers={
                     "User-Agent": "VaporFetch-App/1.0",
                     "Accept": "application/vnd.github.v3+json"
@@ -219,6 +246,8 @@ class ContainerUpdater:
             "current_commit": current_sha,
             "current_short_sha": current_sha[:7] if not is_dev else "dev",
             "is_dev": is_dev,
+            "update_channel": self.update_channel,
+            "image_tag": self.update_image_tag,
             "latest_commit": latest_sha,
             "latest_short_sha": latest_sha[:7] if latest_sha else "",
             "commit_message": commit_message,
@@ -251,7 +280,7 @@ class ContainerUpdater:
         loop = asyncio.get_running_loop()
         def do_update():
             # 1. Pull the newest image first
-            self.docker.pull_image("ghcr.io/theretrogeekyt-dev/vaporfetch", "latest", timeout=120)
+            self.docker.pull_image("ghcr.io/theretrogeekyt-dev/vaporfetch", self.update_image_tag, timeout=120)
             # 2. Trigger watchtower recreation
             return self.docker.trigger_watchtower_recreate(container_name)
 
@@ -261,9 +290,8 @@ class ContainerUpdater:
 
         return {
             "success": True,
-            "message": f"Update triggered for {container_name}. Recreating container with latest image..."
+            "message": f"Update triggered for {container_name}. Recreating container with image tag '{self.update_image_tag}'..."
         }
 
 
 container_updater = ContainerUpdater()
-

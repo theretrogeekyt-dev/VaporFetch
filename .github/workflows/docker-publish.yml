@@ -3,8 +3,7 @@ name: Build & Publish Docker Image
 on:
   push:
     branches:
-      - main
-      - master
+      - '**'
     tags:
       - 'v*.*.*'
   workflow_dispatch:
@@ -65,4 +64,3 @@ jobs:
             APP_VERSION=${{ steps.meta.outputs.version || 'latest' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-

@@ -20,6 +20,8 @@ DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 APP_VERSION = os.getenv("APP_VERSION", "1.0.0")
 APP_COMMIT_SHA = os.getenv("APP_COMMIT_SHA", "dev")
 DOCKER_SOCKET_PATH = Path(os.getenv("DOCKER_SOCKET_PATH", "/var/run/docker.sock"))
+UPDATE_CHANNEL = os.getenv("UPDATE_CHANNEL", "main").strip() or "main"
+UPDATE_IMAGE_TAG = os.getenv("UPDATE_IMAGE_TAG", "").strip()
 
 # Path to SteamCMD executable
 def find_steamcmd() -> str:
@@ -273,4 +275,3 @@ def save_settings(new_settings: dict) -> dict:
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(current, f, indent=2)
     return current
-

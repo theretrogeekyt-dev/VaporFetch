@@ -9,6 +9,22 @@ async function requestJson(url, options) {
   return payload;
 }
 
+async function sendSteamGuardCode(code, state, credentials) {
+  const normalized = code.trim().toUpperCase();
+  if (!/^[A-Z0-9]{5,8}$/.test(normalized)) {
+    throw new Error("Enter the current Steam Guard code.");
+  }
+  const options = {method: "POST", headers: {"Content-Type": "application/json"}};
+  if (state === "waiting_code") {
+    await requestJson("/api/auth/steamcmd/code", {...options, body: JSON.stringify({code: normalized})});
+  } else {
+    await requestJson("/api/auth/steamcmd/cancel", {method: "POST"});
+    await requestJson("/api/auth/steamcmd/authorize", {
+      ...options, body: JSON.stringify({...credentials, guard_code: normalized}),
+    });
+  }
+}
+
 function setupAppIdForm(onQueued) {
   const form = document.getElementById("appIdForm");
   const input = document.getElementById("manualAppId");

@@ -372,7 +372,7 @@
 
       <!-- Stage 1: Enter Username & Password -->
       <div id="mLoginFormStage">
-        <p class="sheet-sub">Enter your credentials. VaporFetch will send a login approval prompt to your Steam Mobile app.</p>
+        <p class="sheet-sub">Sign in with SteamCMD. Steam may ask you to approve the sign-in or enter a Steam Guard code.</p>
 
         <form onsubmit="submitMobileLogin(event)">
           <div class="mobile-form-group">
@@ -414,21 +414,22 @@
               <path d="M9 12l2 2 4-4"/>
             </svg>
           </div>
-          <h4>Approve on Steam Mobile</h4>
-          <p class="sheet-sub">A login approval request has been sent to your <strong>Steam Mobile app</strong> on this phone.<br>Pull down your notification shade or open Steam and tap <strong>Approve</strong>.</p>
+          <h4>Steam Guard authorization</h4>
+          <p class="sheet-sub">If Steam requests approval, open Steam Guard in the Steam Mobile app.</p>
         </div>
 
         <div class="qr-status-indicator">
           <span class="pulse-dot"></span>
-          <span id="mLoginStatusText">Waiting for Steam Guard approval...</span>
+          <span id="mLoginStatusText">Starting SteamCMD and connecting to Steam…</span>
         </div>
 
         <!-- Fallback 2FA Code Input -->
-        <div id="mLoginFallbackWrap" style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-color);">
-          <small class="form-hint" style="display: block; margin-bottom: 6px;">Using an authenticator code or email code instead?</small>
+        <div id="mLoginFallbackWrap" style="display: none; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+          <label for="mLoginCodeInput">Steam Guard code</label>
+          <small class="form-hint" style="display: block; margin-bottom: 6px;">In the Steam Mobile app, open Steam Guard and choose Show Steam Guard code. Use the email code if Steam sent one.</small>
           <div style="display: flex; gap: 8px;">
-            <input type="text" id="mLoginCodeInput" placeholder="5-char code" maxlength="10" style="flex: 1; text-transform: uppercase; font-family: monospace; font-size: 14px; text-align: center;">
-            <button type="button" class="btn btn-primary btn-sm" onclick="submitMobileLoginCode()">Submit Code</button>
+            <input type="text" id="mLoginCodeInput" placeholder="Enter code" maxlength="8" autocomplete="one-time-code" style="flex: 1; text-transform: uppercase; font-family: monospace; font-size: 14px; text-align: center;">
+            <button type="button" class="btn btn-primary btn-sm" id="mLoginCodeSubmit" onclick="submitMobileLoginCode()">Submit Code</button>
           </div>
         </div>
 

@@ -111,6 +111,7 @@ class SteamCmdAuthRequest(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
     api_key: Optional[str] = None
+    guard_code: Optional[str] = None
 
 class SteamCmdCodeRequest(BaseModel):
     code: str
@@ -293,7 +294,9 @@ async def start_steamcmd_auth(req: SteamCmdAuthRequest):
     try:
         if req.api_key and req.api_key.strip():
             save_settings({"steam_api_key": req.api_key.strip()})
-        status = await steamcmd_auth_manager.start_authorization(username=req.username, password=req.password)
+        status = await steamcmd_auth_manager.start_authorization(
+            username=req.username, password=req.password, guard_code=req.guard_code
+        )
         return status
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))

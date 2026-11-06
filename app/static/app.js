@@ -170,6 +170,8 @@ async function logout() {
 
 // QR Code Authentication Modal & Polling
 let steamCmdAuthPollTimer = null;
+let steamCmdAuthState = "";
+let steamCmdCredentials = null;
 
 function openQrModal() {
   document.getElementById("qrModal").style.display = "flex";
@@ -197,6 +199,10 @@ function openPasswordSetupModal() {
 }
 
 function closeQrModal() {
+  if (steamCmdAuthPollTimer) fetch("/api/auth/steamcmd/cancel", {method: "POST"}).catch(() => {});
+  steamCmdCredentials = null;
+  document.getElementById("oneTimePasswordInput").value = "";
+  document.getElementById("steamCmdCodeInput").value = "";
   document.getElementById("qrModal").style.display = "none";
   if (qrPollTimer) {
     clearInterval(qrPollTimer);
@@ -291,46 +297,25 @@ async function pollQrStatus(clientId, requestId) {
 async function submitOneTimePassword(event) {
   event.preventDefault();
   const pwdInput = document.getElementById("oneTimePasswordInput");
-  const password = pwdInput ? pwdInput.value.trim() : "";
+  const password = pwdInput?.value || "";
   if (!password) return;
 
   const btn = document.getElementById("savePasswordBtn");
   if (btn) {
     btn.disabled = true;
-    btn.textContent = "Saving...";
   }
 
   try {
-    const username = currentUser ? currentUser.account_name : "";
-    const res = await fetch("/api/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        steamcmd_password: password,
-        steamcmd_username: username
-      })
-    });
-
-    if (!res.ok) {
-      throw new Error("Failed to save password");
-    }
-
-    const banner = document.getElementById("setupBanner");
-    if (banner) banner.style.display = "none";
-
-    showToast("Password saved! Initializing one-time machine authorization...");
-    startSteamCmdDeviceAuth(username, password);
-  } catch (e) {
-    showToast(e.message, true);
+    await startSteamCmdDeviceAuth(currentUser?.account_name || "", password);
   } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "Save Password & Authorize Device";
-    }
+    if (btn) btn.disabled = false;
   }
 }
 
 async function startSteamCmdDeviceAuth(username, password) {
+  steamCmdCredentials = {username, password};
+  steamCmdAuthState = "starting";
+  document.getElementById("steamCmdCodeInput").value = "";
   document.getElementById("qrScanSection").style.display = "none";
   document.getElementById("qrPasswordSection").style.display = "none";
   const authSec = document.getElementById("qrSteamCmdAuthSection");
@@ -349,9 +334,7 @@ async function startSteamCmdDeviceAuth(username, password) {
   if (iconEl) iconEl.textContent = "🔑";
   if (titleEl) titleEl.textContent = "One-and-Done Device Authorization";
   if (subtitleEl) subtitleEl.textContent = "Connecting to Steam to register machine authorization...";
-  if (infoText) {
-    infoText.innerHTML = `<strong>Steam Guard Prompt:</strong> SteamCMD is connecting to Steam. Please check your Steam Mobile app on your phone: tap <strong>"Approve"</strong> when the notification appears.`;
-  }
+  if (infoText) infoText.textContent = "Starting SteamCMD and connecting to Steam…";
   if (codeGroup) codeGroup.style.display = "none";
   if (liveLog) liveLog.textContent = "Starting SteamCMD authorization...";
   if (pulseDot) {
@@ -386,10 +369,13 @@ async function startSteamCmdDeviceAuth(username, password) {
 }
 
 async function pollSteamCmdAuthStatus() {
+  const timer = steamCmdAuthPollTimer;
   try {
     const res = await fetch("/api/auth/steamcmd/status");
     if (!res.ok) return;
     const data = await res.json();
+    if (!timer || steamCmdAuthPollTimer !== timer) return;
+    steamCmdAuthState = data.state;
 
     const iconEl = document.getElementById("authStageIcon");
     const titleEl = document.getElementById("authStageTitle");
@@ -405,18 +391,15 @@ async function pollSteamCmdAuthStatus() {
       liveLog.textContent = data.status_message;
     }
 
-    if (data.state === "waiting_code") {
-      if (codeGroup) codeGroup.style.display = "block";
-      if (infoText) {
-        infoText.innerHTML = `<strong>Steam Guard Code Required:</strong> Enter the 2FA authenticator code from your Steam Mobile app below.`;
-      }
-    } else {
-      if (codeGroup) codeGroup.style.display = "none";
-    }
+    if (codeGroup) codeGroup.style.display = ["signing_in", "waiting_code", "waiting_approval", "error"].includes(data.state) ? "block" : "none";
+    if (infoText && data.status_message) infoText.textContent = data.status_message;
 
     if (data.state === "success") {
       clearInterval(steamCmdAuthPollTimer);
       steamCmdAuthPollTimer = null;
+      steamCmdCredentials = null;
+      document.getElementById("oneTimePasswordInput").value = "";
+      document.getElementById("setupBanner").style.display = "none";
       if (iconEl) iconEl.textContent = "✅";
       if (titleEl) titleEl.textContent = "Machine Authorized!";
       if (subtitleEl) subtitleEl.textContent = "One and done! No authorization requests will be sent during downloads.";
@@ -447,22 +430,21 @@ async function pollSteamCmdAuthStatus() {
 async function submitSteamCmdCode() {
   const input = document.getElementById("steamCmdCodeInput");
   const code = input ? input.value.trim() : "";
-  if (!code) return;
+  if (!code || !steamCmdCredentials) return;
+  const button = document.getElementById("steamCmdCodeSubmit");
+  const credentials = steamCmdCredentials;
+  button.disabled = true;
 
   try {
-    const res = await fetch("/api/auth/steamcmd/code", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code })
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "Failed to submit code");
-    }
+    await sendSteamGuardCode(code, steamCmdAuthState, credentials);
+    if (steamCmdCredentials !== credentials) return;
     input.value = "";
+    if (!steamCmdAuthPollTimer) steamCmdAuthPollTimer = setInterval(pollSteamCmdAuthStatus, 1500);
     showToast("Submitted 2FA code to SteamCMD...");
   } catch (e) {
     showToast(e.message, true);
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -488,7 +470,7 @@ function finishSteamCmdAuth() {
 
 function openDeviceAuthorizationModal() {
   const username = (document.getElementById("cfgUsername")?.value || currentUser?.account_name || "").trim();
-  const password = (document.getElementById("cfgPassword")?.value || "").trim();
+  const password = document.getElementById("cfgPassword")?.value || "";
 
   if (!username) {
     showToast("Please sign in or enter a Steam username in Settings first.", true);
@@ -501,7 +483,7 @@ function openDeviceAuthorizationModal() {
 
   closeSettingsModal();
   document.getElementById("qrModal").style.display = "flex";
-  startSteamCmdDeviceAuth(username, password);
+  startSteamCmdDeviceAuth(username, password === "******" ? "" : password);
 }
 
 async function updateSettingsAuthStatus() {

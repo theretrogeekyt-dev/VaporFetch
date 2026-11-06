@@ -20,7 +20,19 @@ PROGRESS_REGEX = re.compile(
     r"Update state \((0x[0-9a-fA-F]+)\)\s+([a-zA-Z\s]+),\s+progress:\s+([0-9.]+)\s+\((\d+)\s*\/\s*(\d+)\)"
 )
 SUCCESS_REGEX = re.compile(r"Success! App '(\d+)'", re.IGNORECASE)
+GUARD_CODE_PROMPT = re.compile(
+    r"(?:steam guard|authenticator|two[- ]factor).*code[^:]*:\s*$|\benter (?:the )?code:\s*$",
+    re.IGNORECASE,
+)
 DOWNLOAD_OUTPUT_TIMEOUT = 15 * 60
+
+
+def normalize_guard_code(code: str) -> str:
+    code = code.strip()
+    if not re.fullmatch(r"[A-Za-z0-9]{5,8}", code):
+        raise ValueError("Enter the Steam Guard code as shown in Steam or your email.")
+    return code.upper()
+
 
 class SteamCmdSessionWorker:
     """
@@ -30,7 +42,7 @@ class SteamCmdSessionWorker:
     """
     def __init__(self):
         self.process: Optional[asyncio.subprocess.Process] = None
-        self.state: str = "disconnected"  # disconnected, starting, waiting_approval, waiting_code, authenticated, downloading, error
+        self.state: str = "disconnected"
         self.status_message: str = ""
         self.current_user: str = ""
         self.is_logged_in: bool = False
@@ -72,9 +84,7 @@ class SteamCmdSessionWorker:
                     break
                 parts = re.split(r"[\r\n]+", buffer + chunk.decode("utf-8", errors="replace"))
                 buffer = parts.pop()
-                if buffer.rstrip().endswith("Steam>") or re.search(
-                    r"(?:steam guard|authenticator|two-factor).*code[^:]*:\s*$", buffer, re.IGNORECASE
-                ):
+                if buffer.rstrip().endswith("Steam>") or GUARD_CODE_PROMPT.search(buffer):
                     parts.append(buffer)
                     buffer = ""
                 for line in parts:
@@ -98,7 +108,7 @@ class SteamCmdSessionWorker:
     async def ensure_session(
         self, username: str, password: str = "",
         log_callback: Optional[Callable[[str], None]] = None,
-        *, install_path: Optional[Path] = None, platform_type: str = "windows",
+        *, install_path: Optional[Path] = None, platform_type: str = "windows", guard_code: str = "",
     ) -> bool:
         """
         Ensures a persistent SteamCMD process is running and logged in.
@@ -130,7 +140,7 @@ class SteamCmdSessionWorker:
             self.is_logged_in = False
             self.log_history = []
             self._target = target
-            self._secrets = {clean_pass} if clean_pass else set()
+            self._secrets = {value for value in (clean_pass, guard_code) if value}
             
             # Clear line queue
             while not self.line_queue.empty():
@@ -191,6 +201,10 @@ class SteamCmdSessionWorker:
                     log_callback(line)
 
                 lower_line = line.lower()
+                if "steamcmd needs to be online" in lower_line:
+                    self.status_message = "SteamCMD could not reach Steam to update. Check the container's connection to Steam."
+                    await self.terminate_session()
+                    raise RuntimeError(self.status_message)
                 if "loading steam api... ok" in lower_line or "type 'quit' to exit" in lower_line or "steam>" in lower_line:
                     ready = True
                     break
@@ -223,11 +237,16 @@ class SteamCmdSessionWorker:
             if log_callback:
                 log_callback(f">> Authenticating '{clean_user}' in persistent session...")
 
+            if guard_code:
+                # SteamCMD accepts a code before the login command in its interactive console.
+                self.process.stdin.write(f"set_steam_guard_code {guard_code}\n".encode("utf-8"))
+            self.state = "verifying_code" if guard_code else "signing_in"
+            self.status_message = "SteamCMD is signing in to Steam…"
             self.process.stdin.write(login_line.encode("utf-8"))
             await self.process.stdin.drain()
 
             # 3. Monitor login output from line queue
-            login_timeout = 120.0  # Allow up to 2 minutes for user to tap Approve on phone
+            login_timeout = 120.0
             start_login = time.monotonic()
 
             while time.monotonic() - start_login < login_timeout:
@@ -246,21 +265,21 @@ class SteamCmdSessionWorker:
 
                 lower_line = line.lower()
 
-                # Detect 2FA mobile authenticator request
-                if (
+                if "waiting for confirmation" in lower_line and lower_line.endswith("ok"):
+                    self.state = "starting"
+                    self.status_message = "Steam Guard approved. Finishing Steam sign-in…"
+                elif (
                     "confirm the login in the steam mobile app" in lower_line
-                    or "waiting for confirmation" in lower_line
-                    or ("logging in user" in lower_line and "to steam public" in lower_line)
+                    or ("waiting for confirmation" in lower_line and "failed" not in lower_line)
                 ):
                     self.state = "waiting_approval"
-                    self.status_message = "Steam Guard request sent! Please tap 'Approve' on your Steam Mobile app."
+                    self.status_message = "Steam is waiting for approval. Open Steam Guard in the Steam Mobile app or use a code below."
                     if log_callback:
                         log_callback(f">> {self.status_message}")
 
-                # Detect 2FA code requirement
-                elif "steam guard code" in lower_line or "authenticator code" in lower_line:
+                elif GUARD_CODE_PROMPT.search(line):
                     self.state = "waiting_code"
-                    self.status_message = "Steam Guard code required. Enter code in Settings."
+                    self.status_message = "SteamCMD is asking for a Steam Guard code. Use the current code from the app or your Steam email."
                     if log_callback:
                         log_callback(f">> {self.status_message}")
 
@@ -288,7 +307,16 @@ class SteamCmdSessionWorker:
                     await self.terminate_session()
                     raise ValueError(self.status_message)
 
-                elif "failed with result code" in lower_line or "failed (account logon denied)" in lower_line:
+                elif "failed" in lower_line and (
+                    "waiting for confirmation" in lower_line or "account logon denied" in lower_line
+                    or "account login denied" in lower_line or "invalid login auth code" in lower_line
+                    or "two-factor code mismatch" in lower_line
+                ):
+                    self.state = "error"
+                    self.status_message = "Steam Guard authorization failed. Retry with a fresh code from the Steam Mobile app or your Steam email."
+                    await self.terminate_session()
+                    raise RuntimeError(self.status_message)
+                elif "failed with result code" in lower_line or "failed (" in lower_line:
                     self.state = "error"
                     self.status_message = f"Steam login failed: {line}"
                     await self.terminate_session()
@@ -303,8 +331,11 @@ class SteamCmdSessionWorker:
                 await self.terminate_session()
                 raise RuntimeError(self.status_message)
 
+            if self.state in ("waiting_approval", "waiting_code", "verifying_code"):
+                self.status_message = "Steam Guard timed out. Retry with a fresh code or approve the next sign-in in the Steam Mobile app."
+            else:
+                self.status_message = "SteamCMD timed out signing in to Steam. Check the container's connection to Steam and retry."
             self.state = "error"
-            self.status_message = "SteamCMD login timed out waiting for mobile approval."
             await self.terminate_session()
             raise TimeoutError(self.status_message)
 
@@ -313,14 +344,13 @@ class SteamCmdSessionWorker:
         if self.state != "waiting_code" or not self.is_alive() or not self.process or not self.process.stdin:
             raise ValueError("No active SteamCMD session waiting for code.")
 
-        clean_code = code.strip()
-        if not re.fullmatch(r"[A-Za-z0-9]{5,8}", clean_code):
-            raise ValueError("Enter the Steam Guard code as shown in Steam or your email.")
+        clean_code = normalize_guard_code(code)
         self._secrets.add(clean_code)
         self.log_history.append(">> Submitting Steam Guard code.")
+        self.state = "verifying_code"
+        self.status_message = "Submitted Steam Guard code, verifying..."
         self.process.stdin.write(f"{clean_code}\n".encode("utf-8"))
         await self.process.stdin.drain()
-        self.status_message = "Submitted Steam Guard code, verifying..."
         return True
 
     async def run_download_job(

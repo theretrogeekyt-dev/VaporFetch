@@ -1,12 +1,16 @@
 import os
+import asyncio
+import json
 import shutil
 import zipfile
 import io
 import urllib.request
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Dict, Any, List, Optional
 
 from app.config import DATA_DIR, BASE_DIR
+from app.storage import write_json
 
 # Directory where Goldberg binaries are stored
 GOLDBERG_ASSETS_DIR = Path(os.getenv("GOLDBERG_PATH", str(DATA_DIR / "goldberg")))
@@ -16,6 +20,56 @@ GOLDBERG_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 GOLDBERG_RELEASE_URLS = [
     "https://gitlab.com/Mr_Goldberg/goldberg_emulator/-/jobs/4247811310/artifacts/download",
 ]
+
+CONFIG_MARKER = ".vaporfetch-goldberg.json"
+CONFIG_FILES = (
+    "steam_appid.txt",
+    "steam_settings/steam_appid.txt",
+    "steam_settings/force_account_name.txt",
+)
+
+
+def copy_dll(source: Path, target: Path):
+    with NamedTemporaryFile(dir=target.parent, suffix=".tmp", delete=False) as temp:
+        path = Path(temp.name)
+    try:
+        shutil.copy2(source, path)
+        path.replace(target)
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def write_emulator_config(directory: Path, appid: int, account_name: str):
+    marker = directory / CONFIG_MARKER
+    if marker.exists() or marker.is_symlink():
+        return
+    contents = (str(appid), str(appid), account_name)
+    created = {}
+    for name, value in zip(CONFIG_FILES, contents):
+        path = directory / name
+        if value and not path.parent.is_symlink() and not path.exists() and not path.is_symlink():
+            created[name] = value
+    if created:
+        write_json(marker, created)
+        for name, value in created.items():
+            path = directory / name
+            path.parent.mkdir(exist_ok=True)
+            with path.open("x", encoding="utf-8") as config:
+                config.write(value)
+
+
+def remove_emulator_config(directory: Path):
+    marker = directory / CONFIG_MARKER
+    if marker.is_symlink() or not marker.is_file():
+        return
+    created = json.loads(marker.read_text(encoding="utf-8"))
+    for name in CONFIG_FILES:
+        path = directory / name
+        if name in created and not path.is_symlink() and not path.parent.is_symlink() and path.is_file():
+            if path.read_text(encoding="utf-8", errors="replace") == created[name]:
+                path.unlink()
+    marker.unlink()
+
 
 class GoldbergManager:
     def __init__(self):
@@ -55,6 +109,11 @@ class GoldbergManager:
 
     async def ensure_binaries(self) -> bool:
         """Ensures Goldberg DLLs exist; checks bundled paths and downloads from mirror if missing."""
+        if self.is_available():
+            return True
+        return await asyncio.to_thread(self._download_binaries)
+
+    def _download_binaries(self) -> bool:
         # 1. If already available in bundled candidate or self.dir, sync to self.dir for persistence
         if self.is_available():
             try:
@@ -135,6 +194,8 @@ class GoldbergManager:
                 if f_lower in ("steam_api.dll", "steam_api64.dll"):
                     full_path = Path(root) / f
                     orig_path = Path(root) / f"{f}.orig"
+                    if full_path.is_symlink() or orig_path.is_symlink():
+                        continue
                     steam_dlls.append(str(full_path))
                     if orig_path.exists():
                         is_patched = True
@@ -169,26 +230,19 @@ class GoldbergManager:
                 if f_lower in ("steam_api.dll", "steam_api64.dll"):
                     target_dll = Path(root) / f
                     orig_dll = Path(root) / f"{f}.orig"
+                    if target_dll.is_symlink() or orig_dll.is_symlink():
+                        continue
 
                     # 1. Back up original if not already backed up
                     if not orig_dll.exists():
-                        shutil.copy2(target_dll, orig_dll)
+                        copy_dll(target_dll, orig_dll)
 
                     # 2. Overwrite with matching Goldberg DLL
                     source_emulator = self.dll64_path if f_lower == "steam_api64.dll" else self.dll32_path
-                    shutil.copy2(source_emulator, target_dll)
+                    copy_dll(source_emulator, target_dll)
                     patched_list.append(str(target_dll))
 
-                    # 3. Create steam_appid.txt next to the DLL
-                    appid_file = Path(root) / "steam_appid.txt"
-                    appid_file.write_text(str(appid), encoding="utf-8")
-
-                    # 4. Create steam_settings folder with account name
-                    settings_dir = Path(root) / "steam_settings"
-                    settings_dir.mkdir(parents=True, exist_ok=True)
-                    (settings_dir / "steam_appid.txt").write_text(str(appid), encoding="utf-8")
-                    if account_name:
-                        (settings_dir / "force_account_name.txt").write_text(account_name, encoding="utf-8")
+                    write_emulator_config(Path(root), appid, account_name)
 
         return {
             "success": True,
@@ -213,19 +267,14 @@ class GoldbergManager:
                     orig_file = Path(root) / f
                     target_name = f[:-5]  # strip '.orig'
                     target_file = Path(root) / target_name
+                    if orig_file.is_symlink() or target_file.is_symlink():
+                        continue
 
                     # Restore original
-                    shutil.move(orig_file, target_file)
+                    orig_file.replace(target_file)
                     restored_list.append(str(target_file))
 
-                    # Remove generated steam_appid.txt and steam_settings if present
-                    appid_file = Path(root) / "steam_appid.txt"
-                    if appid_file.exists():
-                        appid_file.unlink(missing_ok=True)
-
-                    settings_dir = Path(root) / "steam_settings"
-                    if settings_dir.exists():
-                        shutil.rmtree(settings_dir, ignore_errors=True)
+                    remove_emulator_config(Path(root))
 
         return {
             "success": True,

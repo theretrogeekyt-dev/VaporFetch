@@ -74,12 +74,9 @@ for ssfn in /steamcmd/ssfn*; do
     fi
 done
 
-# Ensure /steamcmd is fully writable and executable by non-root users
-chmod -R 777 /steamcmd 2>/dev/null || true
-chmod -R +x /steamcmd 2>/dev/null || true
-
-# Set ownership across data, steam_home, and app
-chown -R "$PUID:$PGID" /app/data /steamcmd /app 2>/dev/null || true
+# Keep application code owned by root and give the runtime user control of SteamCMD and its state.
+chown -R "$PUID:$PGID" /app/data /steamcmd 2>/dev/null || true
+chmod -R u+rwX,go-w /steamcmd
 
 # Ensure /downloads is writable by the user
 if [ -d "/downloads" ]; then

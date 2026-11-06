@@ -1640,3 +1640,129 @@ body {
 
 
 
+.logo .logo-icon {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+}
+
+.btn svg {
+  width: 1em;
+  height: 1em;
+  flex: 0 0 auto;
+}
+
+.welcome-card.placeholder-card {
+  position: relative;
+  overflow: hidden;
+  text-align: left;
+  padding: clamp(28px, 6vw, 84px);
+  max-width: 920px;
+  margin-top: clamp(34px, 8vh, 84px);
+  border: 1px solid #2e4965;
+  border-radius: 20px;
+  background:
+    radial-gradient(ellipse at 100% 0%, #1c4b69 0%, transparent 62%),
+    repeating-linear-gradient(90deg, transparent 0 47px, #60b5de0c 47px 48px),
+    repeating-linear-gradient(0deg, transparent 0 47px, #60b5de0c 47px 48px),
+    #101b2a;
+}
+
+.welcome-eyebrow {
+  color: #8fdbfc;
+  font-size: .72rem;
+  font-weight: 750;
+  letter-spacing: .15em;
+}
+
+.welcome-card h1 {
+  color: #f0f7ff;
+  font-size: clamp(2.15rem, 5vw, 4.5rem);
+  line-height: 1.03;
+  letter-spacing: -.055em;
+  margin: .45em 0 .3em;
+}
+
+.welcome-card h1 span {
+  display: block;
+  color: #8fdbfc;
+}
+
+.welcome-card.placeholder-card p {
+  color: #c3d4e7;
+  font-size: 1rem;
+  line-height: 1.55;
+  max-width: 33rem;
+  margin: 0 0 1.4rem;
+}
+
+.welcome-queue {
+  margin-left: .4rem;
+}
+
+.app-id-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .65rem 1rem;
+  padding: 1rem;
+  margin-bottom: 1.25rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+}
+
+.app-id-form label {
+  font-weight: 700;
+}
+
+.app-id-form p {
+  margin-top: .2rem;
+  color: var(--text-muted);
+  font-size: .84rem;
+}
+
+.app-id-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.app-id-controls input {
+  width: 8rem;
+  min-height: 2.4rem;
+  padding: .4rem .65rem;
+  color: var(--text-main);
+  background: var(--bg-main);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font: inherit;
+}
+
+#appIdStatus {
+  flex-basis: 100%;
+}
+
+#appIdStatus:empty {
+  display: none;
+}
+
+:focus-visible {
+  outline: 2px solid #8fdbfc;
+  outline-offset: 3px;
+}
+
+@media (max-width: 600px) {
+  .welcome-queue {
+    width: 100%;
+    margin: .55rem 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
+}

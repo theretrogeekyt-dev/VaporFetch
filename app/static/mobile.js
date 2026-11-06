@@ -208,7 +208,7 @@ function closeProfileModal() {
 
 async function logoutMobile() {
   try {
-    await fetch("/api/auth/logout", { method: "POST" });
+    await requestJson("/api/auth/logout", { method: "POST" });
     closeProfileModal();
     currentUser = null;
     allGames = [];
@@ -345,7 +345,7 @@ function pollMobileLoginStatus() {
       }
 
       // Check success
-      if (data.authorized || data.state === "success") {
+      if (data.state === "success") {
         clearInterval(mobileLoginPollTimer);
         mobileLoginPollTimer = null;
         vibrate([20, 60, 20]);
@@ -492,9 +492,9 @@ function renderMobileGames() {
     const hours = Math.round((game.playtime_forever || 0) / 60);
 
     return `
-      <div class="mobile-game-card ${isSelected ? 'selected' : ''}" onclick="toggleGameSelectionMobile(${game.appid})">
+      <button type="button" class="mobile-game-card ${isSelected ? 'selected' : ''}" aria-pressed="${isSelected}" onclick="toggleGameSelectionMobile(${Number(game.appid)})">
         <div class="card-img-wrap">
-          <img src="${banner}" alt="${escapeHtml(game.name)}" loading="lazy" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 460 215%22 fill=%22%23162036%22><text x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 fill=%22%2364748b%22 font-family=%22sans-serif%22 font-size=%2216%22>Steam Game</text></svg>'">
+          <img src="${escapeHtml(banner)}" alt="${escapeHtml(game.name)}" loading="lazy" onerror="this.onerror=null; this.src='/static/vaporfetch.svg'">
           <div class="card-checkbox-badge">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20 6 9 17 4 12"/></svg>
           </div>
@@ -503,7 +503,7 @@ function renderMobileGames() {
           <div class="card-title">${escapeHtml(game.name)}</div>
           <div class="card-playtime">${hours > 0 ? hours + ' hrs played' : 'Unplayed'}</div>
         </div>
-      </div>
+      </button>
     `;
   }).join("");
 }
@@ -622,7 +622,7 @@ function renderQueueState(data) {
   const items = data.items || [];
   const activeId = data.active_id;
 
-  const runningItem = items.find(i => i.id === activeId && i.status === "running");
+  const runningItem = items.find(i => i.id === activeId && ["running", "cancelling"].includes(i.status));
   const pendingItems = items.filter(i => i.status === "queued");
   const historyItems = items.filter(i => i.status === "completed" || i.status === "failed" || i.status === "cancelled");
 
@@ -687,7 +687,10 @@ function renderActiveCard(item) {
   if (speedEl) speedEl.textContent = `${speedMBs} MB/s`;
 
   if (etaEl) etaEl.textContent = formatEta(item.eta_seconds);
-  if (cancelBtn) cancelBtn.style.display = "inline-flex";
+  if (cancelBtn) {
+    cancelBtn.style.display = "inline-flex";
+    cancelBtn.disabled = item.status === "cancelling";
+  }
 }
 
 function formatEta(sec) {
@@ -750,10 +753,22 @@ function renderHistoryQueue(items) {
             <div class="queue-row-sub">${item.step} ${item.error ? '&bull; <span style="color: var(--accent-red);">' + escapeHtml(item.error) + '</span>' : ''}</div>
           </div>
         </div>
+        ${isSuccess ? "" : `<button class="btn btn-xs btn-secondary" data-retry-id="${escapeHtml(item.id)}">Retry</button>`}
       </div>
     `;
   }).join("");
 }
+
+document.getElementById("mobileHistoryList").addEventListener("click", async (event) => {
+  const retry = event.target.closest("[data-retry-id]");
+  if (!retry) return;
+  try {
+    await requestJson(`/api/queue/${encodeURIComponent(retry.dataset.retryId)}/retry`, {method: "POST"});
+    fetchQueue();
+  } catch (error) {
+    showToast(error.message, true);
+  }
+});
 
 async function cancelActiveDownload() {
   if (!activeDownloadItem) return;
@@ -762,8 +777,8 @@ async function cancelActiveDownload() {
   vibrate(15);
 
   try {
-    await fetch(`/api/queue/${activeDownloadItem.id}`, { method: "DELETE" });
-    showToast("Download cancelled.");
+    await requestJson(`/api/queue/${activeDownloadItem.id}`, { method: "DELETE" });
+    showToast("Cancellation requested.");
     fetchQueue();
   } catch (e) {
     showToast("Failed to cancel download: " + e.message, true);
@@ -773,7 +788,7 @@ async function cancelActiveDownload() {
 async function removeQueueItem(itemId) {
   vibrate(10);
   try {
-    await fetch(`/api/queue/${itemId}`, { method: "DELETE" });
+    await requestJson(`/api/queue/${itemId}`, { method: "DELETE" });
     fetchQueue();
   } catch (e) {
     showToast(e.message, true);
@@ -783,9 +798,11 @@ async function removeQueueItem(itemId) {
 async function clearCompletedQueue() {
   vibrate(10);
   try {
-    await fetch("/api/queue/clear-completed", { method: "POST" });
+    await requestJson("/api/queue/clear-completed", { method: "POST" });
     fetchQueue();
-  } catch (e) {}
+  } catch (e) {
+    showToast(e.message, true);
+  }
 }
 
 // ---------------- Console & Live Log Streaming ---------------- //
@@ -800,9 +817,6 @@ function initSSE() {
     } catch (e) {}
   };
 
-  sseConnection.onerror = () => {
-    setTimeout(initSSE, 5000);
-  };
 }
 
 function handleSSEEvent(payload) {
@@ -811,10 +825,8 @@ function handleSSEEvent(payload) {
 
   if (eventType === "queue_update") {
     renderQueueState(data);
-  } else if (eventType === "item_update") {
-    if (activeDownloadItem && activeDownloadItem.id === data.id) {
-      renderActiveCard(data);
-    }
+  } else if (eventType === "item_update" && data.status === "running") {
+    renderActiveCard(data);
   } else if (eventType === "item_log") {
     appendConsoleLog(data.line);
   }
@@ -1015,3 +1027,5 @@ function escapeHtml(str) {
     .replace(/'/g, "&#039;");
 }
 
+
+setupAppIdForm(fetchQueue);

@@ -1,5 +1,6 @@
 import os
 import re
+import signal
 import time
 import asyncio
 from pathlib import Path
@@ -18,14 +19,14 @@ from app.config import (
 PROGRESS_REGEX = re.compile(
     r"Update state \((0x[0-9a-fA-F]+)\)\s+([a-zA-Z\s]+),\s+progress:\s+([0-9.]+)\s+\((\d+)\s*\/\s*(\d+)\)"
 )
+SUCCESS_REGEX = re.compile(r"Success! App '(\d+)'", re.IGNORECASE)
+DOWNLOAD_OUTPUT_TIMEOUT = 15 * 60
 
 class SteamCmdSessionWorker:
     """
     Manages a long-running, persistent interactive SteamCMD process.
-    By launching SteamCMD strictly in interactive console mode (WITHOUT any + CLI arguments)
-    and piping login/download commands directly to stdin, SteamCMD stays alive at the Steam>
-    prompt indefinitely. This ensures mobile 2FA approval occurs exactly ONCE per container
-    lifecycle, and all queued/batch downloads run without prompting your phone.
+    SteamCMD can reuse an authorized session for the same destination and platform.
+    A different destination needs a new console so force_install_dir precedes login.
     """
     def __init__(self):
         self.process: Optional[asyncio.subprocess.Process] = None
@@ -37,6 +38,9 @@ class SteamCmdSessionWorker:
         self.line_queue: asyncio.Queue = asyncio.Queue()
         self._reader_task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
+        self._process_lock = asyncio.Lock()
+        self._target = None
+        self._secrets: set[str] = set()
 
     def is_alive(self) -> bool:
         return self.process is not None and self.process.returncode is None
@@ -57,23 +61,32 @@ class SteamCmdSessionWorker:
         }
 
     async def _stdout_reader(self):
-        """Reads stdout from the SteamCMD subprocess line by line and queues it."""
+        """Read line updates and interactive prompts that have no trailing newline."""
         try:
+            buffer = ""
             while True:
                 if not self.process or not self.process.stdout:
                     break
-                line_bytes = await self.process.stdout.readline()
-                if not line_bytes:
+                chunk = await self.process.stdout.read(4096)
+                if not chunk:
                     break
-                line = line_bytes.decode("utf-8", errors="replace").rstrip()
-                if not line:
-                    continue
-
-                self.log_history.append(line)
-                if len(self.log_history) > 150:
-                    self.log_history.pop(0)
-
-                await self.line_queue.put(line)
+                parts = re.split(r"[\r\n]+", buffer + chunk.decode("utf-8", errors="replace"))
+                buffer = parts.pop()
+                if buffer.rstrip().endswith("Steam>") or re.search(
+                    r"(?:steam guard|authenticator|two-factor).*code[^:]*:\s*$", buffer, re.IGNORECASE
+                ):
+                    parts.append(buffer)
+                    buffer = ""
+                for line in parts:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    for secret in self._secrets:
+                        line = line.replace(secret, "[redacted]")
+                    self.log_history.append(line)
+                    if len(self.log_history) > 150:
+                        self.log_history.pop(0)
+                    self.line_queue.put_nowait(line)
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -82,27 +95,33 @@ class SteamCmdSessionWorker:
             self.is_logged_in = False
             await self.line_queue.put(None)  # Sentinel for EOF
 
-    async def ensure_session(self, username: str, password: str = "", log_callback: Optional[Callable[[str], None]] = None) -> bool:
+    async def ensure_session(
+        self, username: str, password: str = "",
+        log_callback: Optional[Callable[[str], None]] = None,
+        *, install_path: Optional[Path] = None, platform_type: str = "windows",
+    ) -> bool:
         """
         Ensures a persistent SteamCMD process is running and logged in.
         If already logged in as the requested user, returns immediately with 0 prompts.
         """
         async with self._lock:
             settings = load_settings()
-            clean_user = (username or settings.get("steamcmd_username", "")).strip()
+            clean_user = (username or settings.get("steamcmd_username", "") or "anonymous").strip()
             clean_pass = password if password is not None else settings.get("steamcmd_password", "")
-
-            if not clean_user:
-                raise ValueError("Steam username is required to start SteamCMD session.")
+            if not re.fullmatch(r"[A-Za-z0-9_]+", clean_user):
+                raise ValueError("Enter a valid Steam account name.")
+            if "\n" in clean_pass or "\r" in clean_pass:
+                raise ValueError("The Steam password must be a single line.")
+            target = (install_path, platform_type)
 
             # If already alive, authenticated, and matching user, return immediately!
-            if self.is_ready() and self.current_user.lower() == clean_user.lower():
+            if self.is_ready() and self.current_user.lower() == clean_user.lower() and self._target == target:
                 if log_callback:
                     log_callback(f"Using active persistent SteamCMD session for '{clean_user}' (no phone prompt).")
                 return True
 
             # If process is running but wrong user or disconnected, terminate first
-            if self.is_alive():
+            if self.process is not None:
                 await self.terminate_session()
 
             self.state = "starting"
@@ -110,6 +129,8 @@ class SteamCmdSessionWorker:
             self.current_user = clean_user
             self.is_logged_in = False
             self.log_history = []
+            self._target = target
+            self._secrets = {clean_pass} if clean_pass else set()
             
             # Clear line queue
             while not self.line_queue.empty():
@@ -122,7 +143,8 @@ class SteamCmdSessionWorker:
                 log_callback(self.status_message)
 
             # Sync and configure autologin beforehand
-            configure_steam_autologin(clean_user)
+            if clean_user != "anonymous":
+                configure_steam_autologin(clean_user)
             sync_steam_credentials()
 
             proc_env = os.environ.copy()
@@ -140,6 +162,7 @@ class SteamCmdSessionWorker:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
                     env=proc_env,
+                    start_new_session=os.name == "posix",
                     cwd="/home/steam" if Path("/home/steam").exists() else None
                 )
                 self._reader_task = asyncio.create_task(self._stdout_reader())
@@ -178,6 +201,16 @@ class SteamCmdSessionWorker:
                 await self.terminate_session()
                 raise RuntimeError(self.status_message)
 
+            # Set the target before login, as required by SteamCMD.
+            if install_path is not None:
+                path = str(install_path)
+                if any(char in path for char in '\r\n"'):
+                    await self.terminate_session()
+                    raise ValueError("The download destination contains unsupported characters.")
+                self.process.stdin.write(f'force_install_dir "{path}"\n'.encode("utf-8"))
+                if platform_type in ("windows", "linux", "macos"):
+                    self.process.stdin.write(f"@sSteamCmdForcePlatformType {platform_type}\n".encode("utf-8"))
+
             # 2. Send login command directly to interactive stdin
             if clean_pass:
                 if " " in clean_pass and not (clean_pass.startswith('"') and clean_pass.endswith('"')):
@@ -195,9 +228,9 @@ class SteamCmdSessionWorker:
 
             # 3. Monitor login output from line queue
             login_timeout = 120.0  # Allow up to 2 minutes for user to tap Approve on phone
-            start_login = time.time()
+            start_login = time.monotonic()
 
-            while time.time() - start_login < login_timeout:
+            while time.monotonic() - start_login < login_timeout:
                 try:
                     line = await asyncio.wait_for(self.line_queue.get(), timeout=15.0)
                 except asyncio.TimeoutError:
@@ -233,10 +266,8 @@ class SteamCmdSessionWorker:
 
                 # Detect successful authentication
                 elif (
-                    "logged in ok" in lower_line 
-                    or "waiting for user info" in lower_line 
-                    or "waiting for client config" in lower_line
-                    or "waiting for confirmation...ok" in lower_line
+                    "logged in ok" in lower_line
+                    or ("waiting for user info" in lower_line and lower_line.endswith("ok"))
                 ):
                     self.is_logged_in = True
                     self.state = "authenticated"
@@ -245,8 +276,9 @@ class SteamCmdSessionWorker:
                         log_callback(f">> {self.status_message}")
                     
                     # Persist authorized status to settings
-                    save_settings({"steamcmd_authorized": True, "steamcmd_username": clean_user})
-                    sync_steam_credentials()
+                    if clean_user != "anonymous":
+                        save_settings({"steamcmd_authorized": True, "steamcmd_username": clean_user})
+                        sync_steam_credentials()
                     return True
 
                 # Detect login failure
@@ -278,11 +310,14 @@ class SteamCmdSessionWorker:
 
     async def submit_steam_guard_code(self, code: str) -> bool:
         """Sends a 2FA Steam Guard code to the running SteamCMD process stdin."""
-        if not self.is_alive() or not self.process or not self.process.stdin:
+        if self.state != "waiting_code" or not self.is_alive() or not self.process or not self.process.stdin:
             raise ValueError("No active SteamCMD session waiting for code.")
 
         clean_code = code.strip()
-        self.log_history.append(f">> Submitting Steam Guard code: {clean_code[:2]}***")
+        if not re.fullmatch(r"[A-Za-z0-9]{5,8}", clean_code):
+            raise ValueError("Enter the Steam Guard code as shown in Steam or your email.")
+        self._secrets.add(clean_code)
+        self.log_history.append(">> Submitting Steam Guard code.")
         self.process.stdin.write(f"{clean_code}\n".encode("utf-8"))
         await self.process.stdin.drain()
         self.status_message = "Submitted Steam Guard code, verifying..."
@@ -305,13 +340,22 @@ class SteamCmdSessionWorker:
         Pipes commands directly to stdin without restarting SteamCMD or triggering mobile prompts.
         """
         # Ensure session is authenticated
-        await self.ensure_session(username, password, log_callback)
+        try:
+            await self.ensure_session(
+                username, password, log_callback, install_path=install_path, platform_type=platform_type
+            )
+            return await self._download(appid, validate, custom_args, log_callback, progress_callback)
+        except (asyncio.CancelledError, Exception):
+            await self.terminate_session()
+            raise
+
+    async def _download(self, appid, validate, custom_args, log_callback, progress_callback) -> bool:
 
         if not self.is_alive() or not self.process or not self.process.stdin:
             raise RuntimeError("SteamCMD process is not alive.")
 
         self.state = "downloading"
-        self.status_message = f"Downloading AppID {appid} to {install_path}..."
+        self.status_message = f"Downloading AppID {appid}..."
 
         # Drain any leftover lines in queue before issuing new download
         while not self.line_queue.empty():
@@ -321,16 +365,7 @@ class SteamCmdSessionWorker:
                 break
 
         # Send download commands to SteamCMD via stdin
-        commands = [
-            f'force_install_dir "{install_path}"',
-        ]
-        if platform_type in ("windows", "linux", "macos"):
-            commands.append(f'@sSteamCmdForcePlatformType {platform_type}')
-        if custom_args:
-            for arg in custom_args.split():
-                if arg:
-                    clean_arg = arg.lstrip('+')
-                    commands.append(clean_arg)
+        commands = [command.strip() for command in custom_args.split("+") if command.strip()]
 
         app_update_cmd = f'app_update {appid}'
         if validate:
@@ -345,25 +380,14 @@ class SteamCmdSessionWorker:
         await self.process.stdin.drain()
 
         # Stream output until download completes or fails
-        download_success = False
-        error_message = ""
-
-        while self.is_alive():
+        while True:
             try:
-                line = await asyncio.wait_for(self.line_queue.get(), timeout=180.0)
-            except asyncio.TimeoutError:
-                if not self.is_alive():
-                    break
-                # Heartbeat check
-                if log_callback:
-                    log_callback("... waiting for SteamCMD download progress ...")
-                continue
+                line = await asyncio.wait_for(self.line_queue.get(), timeout=DOWNLOAD_OUTPUT_TIMEOUT)
+            except asyncio.TimeoutError as exc:
+                raise TimeoutError("SteamCMD stopped reporting download progress.") from exc
 
             if line is None:  # Process exited
-                break
-
-            if log_callback:
-                log_callback(line)
+                raise RuntimeError("SteamCMD exited before confirming the download.")
 
             # Parse progress
             match = PROGRESS_REGEX.search(line)
@@ -374,59 +398,55 @@ class SteamCmdSessionWorker:
                 tot_b = int(tot_b_str)
                 if progress_callback:
                     progress_callback(pct, cur_b, tot_b, state_name.capitalize())
+            if log_callback:
+                log_callback(line)
 
             # Detect success
-            if "Success! App" in line:
-                download_success = True
-                if progress_callback:
-                    progress_callback(100.0, 0, 0, "Success")
-                break
+            success = SUCCESS_REGEX.search(line)
+            if success and int(success.group(1)) == appid:
+                self.state = "authenticated"
+                return True
 
             # Detect failure conditions
-            if "ERROR!" in line or "Failed to install" in line:
-                error_message = line
-                break
-            elif "No subscription" in line:
-                error_message = "Steam account does not own this game (No subscription)."
-                break
-            elif "Disk write failure" in line:
-                error_message = "Disk write failure in destination folder."
-                break
-            elif "Enter password for user" in line or "steamcmd has been disconnected" in line:
-                self.is_logged_in = False
-                error_message = "SteamCMD session disconnected or authorization expired."
-                break
-
-        self.state = "authenticated" if self.is_logged_in else "disconnected"
-
-        if download_success:
-            return True
-        else:
-            raise RuntimeError(error_message or "SteamCMD download failed.")
+            lower_line = line.lower()
+            if "no subscription" in lower_line:
+                raise RuntimeError("This app requires a Steam account that owns it (No subscription).")
+            if "disk write failure" in lower_line:
+                raise RuntimeError("SteamCMD could not write to the download destination.")
+            if "enter password for user" in lower_line or "steamcmd has been disconnected" in lower_line:
+                raise RuntimeError("SteamCMD disconnected or authorization expired.")
+            if "error!" in lower_line or "failed to install" in lower_line or "before logon" in lower_line:
+                raise RuntimeError(line)
 
     async def terminate_session(self):
         """Terminates the running SteamCMD process cleanly."""
-        self.is_logged_in = False
-        self.state = "disconnected"
-        if self._reader_task and not self._reader_task.done():
-            self._reader_task.cancel()
-
-        if self.process and self.process.returncode is None:
-            try:
-                if self.process.stdin:
-                    self.process.stdin.write(b"quit\n")
-                    await self.process.stdin.drain()
-            except Exception:
-                pass
-
-            try:
-                await asyncio.wait_for(self.process.wait(), timeout=3.0)
-            except Exception:
+        async with self._process_lock:
+            self.is_logged_in = False
+            self.state = "disconnected"
+            process = self.process
+            if process and process.returncode is None:
+                if process.stdin:
+                    try:
+                        process.stdin.write(b"quit\n")
+                        await process.stdin.drain()
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
                 try:
-                    self.process.kill()
-                except Exception:
-                    pass
-        self.process = None
+                    await asyncio.wait_for(process.wait(), timeout=3.0)
+                except asyncio.TimeoutError:
+                    try:
+                        if os.name == "posix":
+                            os.killpg(process.pid, signal.SIGKILL)
+                        else:
+                            process.kill()
+                    except ProcessLookupError:
+                        pass
+                    await process.wait()
+            if self._reader_task:
+                self._reader_task.cancel()
+                await asyncio.gather(self._reader_task, return_exceptions=True)
+            self.process = self._reader_task = None
+            self._secrets.clear()
 
 
 # Singleton instance shared across the application

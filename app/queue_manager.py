@@ -1,136 +1,73 @@
 import re
-import os
 import time
 import json
 import uuid
-import shutil
+import logging
 import asyncio
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
 from pydantic import BaseModel, Field
 
-from app.config import (
-    DOWNLOAD_DIR,
-    DATA_DIR,
-    STEAM_HOME_DIR,
-    STEAMCMD_BIN,
-    load_settings,
-    save_settings,
-    sync_steam_credentials,
-    has_steam_credentials,
-    configure_steam_autologin
-)
+from app.config import DOWNLOAD_DIR, DATA_DIR, load_settings
 from app.auth import auth_manager
 from app.steam_session import steam_session
+from app.storage import write_json
 
 QUEUE_FILE = DATA_DIR / "queue.json"
+logger = logging.getLogger(__name__)
 
-# Regex for SteamCMD download progress:
-# e.g.: "Update state (0x5) downloading, progress: 42.15 (1234567890 / 2928374610)"
-PROGRESS_REGEX = re.compile(
-    r"Update state \((0x[0-9a-fA-F]+)\)\s+([a-zA-Z\s]+),\s+progress:\s+([0-9.]+)\s+\((\d+)\s*\/\s*(\d+)\)"
-)
 
 def sanitize_filename(name: str) -> str:
-    """Sanitizes directory names to avoid filesystem collisions or illegal characters."""
-    sanitized = re.sub(r'[\\/*?:"<>|]', "", name).strip()
-    return sanitized or "SteamGame"
+    """Make a bounded, portable NAS directory name."""
+    clean = re.sub(r'[\\/*?:"<>|\x00-\x1f\x7f]', "", name)
+    return clean.encode("utf-8")[:180].decode("utf-8", errors="ignore").strip(" .") or "SteamGame"
+
+
+def safe_install_path(path: Path) -> bool:
+    """Game operations may only target real, immediate children of the download root."""
+    try:
+        return (
+            path.parent.resolve() == DOWNLOAD_DIR.resolve()
+            and path.resolve().parent == DOWNLOAD_DIR.resolve()
+            and path.resolve().name == path.name
+            and not path.is_symlink()
+        )
+    except (OSError, RuntimeError):
+        return False
+
+
+def find_existing_install(appid: int) -> Optional[Path]:
+    manifest = f"appmanifest_{appid}.acf"
+    for child in DOWNLOAD_DIR.iterdir():
+        if child.is_dir() and safe_install_path(child):
+            if (child / manifest).is_file() or (child / "steamapps" / manifest).is_file():
+                return child
+    return None
 
 
 async def post_process_game_directory(
-    install_path: Path, 
-    appid: int = 0, 
-    log_tail: Optional[List[str]] = None,
-    require_goldberg: bool = False
+    install_path: Path, appid: int, log_tail: List[str], require_goldberg: bool = False
 ):
-    """
-    Cleans up post-download game directory:
-    1. Flattens SteamCMD's nested steamapps/common/<Game> structure directly into install_path.
-    2. Moves any appmanifest_*.acf into install_path and completely removes the steamapps folder.
-    3. Renames any CommonRedist folder (_CommonRedist, CommonRedist, etc.) to 'Redistrutables'.
-    4. Optionally applies Goldberg emulator for DRM-free offline play (required if require_goldberg=True).
-    """
-    def log(msg: str):
-        if log_tail is not None:
-            log_tail.append(f"[PostProcess] {msg}")
-
-    # Step 1: Look for steamapps folder (steamapps or steam apps, case-insensitive)
-    steamapps_dirs = [
-        item for item in install_path.iterdir() 
-        if item.is_dir() and item.name.lower() in ("steamapps", "steam apps")
-    ]
-
-    for s_dir in steamapps_dirs:
-        common_dir = None
-        for sub in s_dir.iterdir():
-            if sub.is_dir() and sub.name.lower() == "common":
-                common_dir = sub
-            elif sub.is_file() and sub.name.startswith("appmanifest_"):
-                # Preserve appmanifest in install_path root
-                target_manifest = install_path / sub.name
-                if not target_manifest.exists():
-                    try:
-                        shutil.move(str(sub), str(target_manifest))
-                    except Exception:
-                        pass
-
-        if common_dir and common_dir.exists():
-            common_entries = list(common_dir.iterdir())
-            if len(common_entries) == 1 and common_entries[0].is_dir():
-                game_subfolder = common_entries[0]
-                log(f"Flattening '{game_subfolder.name}' directly into '{install_path.name}'...")
-                for game_item in list(game_subfolder.iterdir()):
-                    dest = install_path / game_item.name
-                    if dest.exists():
-                        if dest.is_dir():
-                            shutil.rmtree(dest, ignore_errors=True)
-                        else:
-                            dest.unlink(missing_ok=True)
-                    shutil.move(str(game_item), str(dest))
-            else:
-                for common_item in common_entries:
-                    dest = install_path / common_item.name
-                    if dest.exists():
-                        if dest.is_dir():
-                            shutil.rmtree(dest, ignore_errors=True)
-                        else:
-                            dest.unlink(missing_ok=True)
-                    shutil.move(str(common_item), str(dest))
-
-        # Remove the steamapps folder completely
-        log(f"Removed '{s_dir.name}' folder.")
-        shutil.rmtree(s_dir, ignore_errors=True)
-
-    # Step 2: Rename any commonredist folder to Redistrutables
-    for root, dirs, files in os.walk(install_path, topdown=False):
-        for d_name in list(dirs):
-            clean = d_name.lower().replace("_", "").replace("-", "").strip()
-            if clean == "commonredist":
-                src_dir = Path(root) / d_name
-                dest_dir = Path(root) / "Redistrutables"
-                if src_dir != dest_dir:
-                    log(f"Renamed '{src_dir.name}' to 'Redistrutables'.")
-                    if dest_dir.exists():
-                        shutil.rmtree(dest_dir, ignore_errors=True)
-                    src_dir.rename(dest_dir)
-
-    # Step 3: Check if Goldberg offline emulator is enabled in settings or requested for this batch
+    # Retain SteamCMD's layout and manifests so retries and future validation can reuse the depot.
     settings = load_settings()
-    should_apply_goldberg = require_goldberg or settings.get("enable_goldberg", False)
-    if should_apply_goldberg and appid > 0:
-        from app.goldberg import goldberg_manager
-        try:
-            await goldberg_manager.ensure_binaries()
-            status = goldberg_manager.check_status(install_path)
-            if status.get("compatible"):
-                account_name = settings.get("steamcmd_username") or "Player"
-                res = goldberg_manager.apply(install_path, appid=appid, account_name=account_name)
-                req_note = " (Batch auto-applied)" if require_goldberg else ""
-                log(f"Applied Goldberg offline wrapper{req_note} ({res['patched_count']} DLLs patched). Original saved to .orig.")
-            else:
-                log(f"Game '{install_path.name}' does not use steam_api.dll or steam_api64.dll (DRM-free or does not require wrapper); automatically skipped Goldberg patch.")
-        except Exception as ex:
-            log(f"Warning: Could not apply Goldberg patch ({ex}); preserving authentic game files.")
+    if not (require_goldberg or settings.get("enable_goldberg", False)):
+        return
+
+    from app.goldberg import goldberg_manager
+
+    try:
+        if not goldberg_manager.check_status(install_path).get("compatible"):
+            log_tail.append("[PostProcess] Offline wrapper skipped. No compatible Steamworks DLLs found.")
+            return
+        await goldberg_manager.ensure_binaries()
+        result = goldberg_manager.apply(
+            install_path, appid=appid, account_name=settings.get("steamcmd_username") or "Player"
+        )
+        log_tail.append(f"[PostProcess] Offline wrapper applied to {result['patched_count']} DLLs.")
+    except Exception as exc:
+        if require_goldberg:
+            raise RuntimeError(f"Download succeeded, but the offline wrapper failed: {exc}") from exc
+        log_tail.append(f"[PostProcess] Offline wrapper could not be applied: {exc}")
 
 
 class QueueItem(BaseModel):
@@ -156,55 +93,81 @@ class QueueItem(BaseModel):
 class DownloadQueueManager:
     def __init__(self):
         self.items: List[QueueItem] = []
-        self.active_process: Optional[asyncio.subprocess.Process] = None
         self.active_item: Optional[QueueItem] = None
         self._subscribers: Set[asyncio.Queue] = set()
         self._worker_task: Optional[asyncio.Task] = None
+        self._download_task: Optional[asyncio.Task] = None
         self._load_queue()
 
     def _load_queue(self):
-        if QUEUE_FILE.exists():
+        if not QUEUE_FILE.exists():
+            return
+        try:
+            records = json.loads(QUEUE_FILE.read_text(encoding="utf-8"))
+            if not isinstance(records, list):
+                raise ValueError("Queue data must be an array.")
+        except (OSError, ValueError):
+            logger.exception("Could not read the download queue")
+            return
+
+        for record in records:
             try:
-                with open(QUEUE_FILE, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    for item_dict in data:
-                        # Reset any previously running items back to queued or failed
-                        if item_dict.get("status") == "running":
-                            item_dict["status"] = "queued"
-                            item_dict["step"] = "Queued (interrupted)"
-                        self.items.append(QueueItem(**item_dict))
-            except Exception as e:
-                print(f"[QueueManager] Failed to load queue file: {e}")
+                item = QueueItem.model_validate(record)
+            except ValueError:
+                logger.warning("Skipping an invalid download queue record")
+                continue
+            if item.status in ("running", "cancelling"):
+                cancelled = item.status == "cancelling"
+                self._reset_item(item, "Cancelled by user" if cancelled else "Queued (interrupted)")
+                if cancelled:
+                    item.status = "cancelled"
+            self.items.append(item)
 
     def _save_queue(self):
+        write_json(QUEUE_FILE, [item.model_dump() for item in self.items])
+
+    def _save_worker_state(self):
         try:
-            with open(QUEUE_FILE, "w", encoding="utf-8") as f:
-                json.dump([item.model_dump() for item in self.items], f, indent=2)
-        except Exception as e:
-            print(f"[QueueManager] Failed to save queue: {e}")
+            self._save_queue()
+        except OSError:
+            logger.exception("Could not persist the download queue")
+
+    @staticmethod
+    def _reset_item(item: QueueItem, step: str):
+        item.status = "queued"
+        item.step = step
+        item.progress = 0
+        item.current_bytes = item.total_bytes = item.eta_seconds = 0
+        item.speed_bps = 0
+        item.started_at = item.completed_at = item.error = None
+        item.log_tail.clear()
 
     def start_worker(self):
         if self._worker_task is None or self._worker_task.done():
             self._worker_task = asyncio.create_task(self._process_queue_loop())
 
+    async def stop_worker(self):
+        if self._worker_task and not self._worker_task.done():
+            self._worker_task.cancel()
+            await asyncio.gather(self._worker_task, return_exceptions=True)
+
     async def subscribe(self) -> asyncio.Queue:
-        q = asyncio.Queue()
-        self._subscribers.add(q)
-        return q
+        queue = asyncio.Queue(maxsize=128)
+        self._subscribers.add(queue)
+        return queue
 
-    def unsubscribe(self, q: asyncio.Queue):
-        self._subscribers.discard(q)
+    def unsubscribe(self, queue: asyncio.Queue):
+        self._subscribers.discard(queue)
 
-    async def broadcast(self, event_type: str, data: Any):
-        msg = json.dumps({"event": event_type, "data": data})
-        dead_queues = []
-        for q in self._subscribers:
-            try:
-                q.put_nowait(msg)
-            except Exception:
-                dead_queues.append(q)
-        for dq in dead_queues:
-            self._subscribers.discard(dq)
+    def broadcast(self, event_type: str, data: Any):
+        message = json.dumps({"event": event_type, "data": data})
+        for queue in self._subscribers:
+            if queue.full():
+                # Replace stale telemetry with an authoritative snapshot.
+                while not queue.empty():
+                    queue.get_nowait()
+                queue.put_nowait(json.dumps({"event": "queue_update", "data": self.get_summary()}))
+            queue.put_nowait(message)
 
     def add_to_queue(self, games: List[Dict[str, Any]], require_goldberg: bool = False) -> List[QueueItem]:
         """Adds a list of games (appid, name) to the queue."""
@@ -214,8 +177,8 @@ class DownloadQueueManager:
             name = str(g.get("name", f"App {appid}"))
             
             # Avoid duplicate active/queued appids
-            existing = next((i for i in self.items if i.appid == appid and i.status in ("queued", "running")), None)
-            if existing:
+            existing = next((i for i in self.items if i.appid == appid and i.status in ("queued", "running", "cancelling")), None)
+            if existing or any(item.appid == appid for item in added):
                 continue
 
             item = QueueItem(
@@ -225,48 +188,91 @@ class DownloadQueueManager:
                 step="Queued in batch",
                 require_goldberg=require_goldberg
             )
-            self.items.append(item)
             added.append(item)
 
-        self._save_queue()
-        self.start_worker()
+        if added:
+            previous = self.items
+            self.items = [*previous, *added]
+            try:
+                self._save_queue()
+            except OSError:
+                self.items = previous
+                raise
+            self.start_worker()
         return added
 
     def remove_from_queue(self, item_id: str) -> bool:
-        """Removes or cancels a queue item."""
-        for idx, item in enumerate(self.items):
-            if item.id == item_id:
-                if item.status == "running":
-                    try:
-                        asyncio.create_task(steam_session.terminate_session())
-                    except Exception:
-                        pass
-                    item.status = "cancelled"
-                    item.step = "Cancelled by user"
-                else:
-                    self.items.pop(idx)
-                self._save_queue()
+        for index, item in enumerate(self.items):
+            if item.id != item_id:
+                continue
+            if item.status == "cancelling":
                 return True
+            if item is self.active_item and self._download_task and not self._download_task.done():
+                previous_status, previous_step = item.status, item.step
+                item.status, item.step = "cancelling", "Cancelling"
+                try:
+                    self._save_queue()
+                except OSError:
+                    item.status, item.step = previous_status, previous_step
+                    raise
+                self._download_task.cancel()
+            else:
+                self.items.pop(index)
+                try:
+                    self._save_queue()
+                except OSError:
+                    self.items.insert(index, item)
+                    raise
+            return True
         return False
 
     def retry_item(self, item_id: str) -> bool:
-        """Resets a failed or cancelled item back to queued."""
-        for item in self.items:
-            if item.id == item_id and item.status in ("failed", "cancelled", "completed"):
-                item.status = "queued"
-                item.step = "Queued for retry"
-                item.progress = 0.0
-                item.error = None
-                item.log_tail.clear()
+        for index, item in enumerate(self.items):
+            if item.id != item_id or item.status not in ("failed", "cancelled", "completed"):
+                continue
+            if any(
+                other.appid == item.appid and other.status in ("queued", "running", "cancelling")
+                for other in self.items
+            ):
+                return False
+            retry = item.model_copy(deep=True)
+            self._reset_item(retry, "Queued for retry")
+            self.items[index] = retry
+            try:
                 self._save_queue()
-                self.start_worker()
-                return True
+            except OSError:
+                self.items[index] = item
+                raise
+            self.start_worker()
+            return True
         return False
 
     def clear_completed(self):
-        """Removes completed and cancelled items from the list."""
-        self.items = [i for i in self.items if i.status in ("queued", "running")]
-        self._save_queue()
+        previous = self.items
+        self.items = [item for item in previous if item.status in ("queued", "running", "cancelling")]
+        try:
+            self._save_queue()
+        except OSError:
+            self.items = previous
+            raise
+
+    def _install_path(self, item: QueueItem) -> Path:
+        for existing in [item, *reversed(self.items)]:
+            if existing.appid == item.appid and existing.install_dir:
+                path = Path(existing.install_dir)
+                shared = any(
+                    other.appid != item.appid and other.install_dir == existing.install_dir
+                    for other in self.items
+                )
+                if not shared and safe_install_path(path) and path.is_dir():
+                    return path
+        existing = find_existing_install(item.appid)
+        if existing is not None:
+            return existing
+        path = DOWNLOAD_DIR / f"{sanitize_filename(item.name)} [{item.appid}]"
+        if not safe_install_path(path):
+            raise ValueError("The download destination points outside the download directory.")
+        return path
 
     def get_summary(self) -> Dict[str, Any]:
         return {
@@ -275,37 +281,52 @@ class DownloadQueueManager:
         }
 
     async def _process_queue_loop(self):
-        while True:
-            # Find first queued item
-            next_item = next((i for i in self.items if i.status == "queued"), None)
-            if not next_item:
+        while item := next((i for i in self.items if i.status == "queued"), None):
+            self.active_item = item
+            item.status = "running"
+            item.started_at = time.time()
+            item.step = "Preparing download"
+            self._save_worker_state()
+            self._download_task = asyncio.create_task(self._run_download(item))
+            try:
+                await self._download_task
+            except asyncio.CancelledError:
+                if item.status == "cancelling":
+                    item.status = "cancelled"
+                    item.step = "Cancelled by user"
+                    item.completed_at = time.time()
+                else:
+                    self._reset_item(item, "Queued (interrupted)")
+                if asyncio.current_task().cancelling():
+                    raise
+            except Exception as exc:
+                item.status = "failed"
+                item.error = str(exc)
+                item.step = "Failed"
+                item.completed_at = time.time()
+                item.log_tail.append(f"Download failed: {exc}")
+            finally:
+                self._download_task = None
                 self.active_item = None
-                break
-
-            self.active_item = next_item
-            await self._run_download(next_item)
-            self._save_queue()
-            await self.broadcast("queue_update", self.get_summary())
-            await asyncio.sleep(1.0)
+                self._save_worker_state()
+                self.broadcast("queue_update", self.get_summary())
 
     async def _run_download(self, item: QueueItem):
-        settings = load_settings()
-        safe_name = sanitize_filename(item.name)
-        install_path = DOWNLOAD_DIR / safe_name
-        install_path.mkdir(parents=True, exist_ok=True)
+        from app.steamcmd_auth import steamcmd_auth_manager
 
-        item.status = "running"
-        item.started_at = time.time()
+        await steamcmd_auth_manager.wait_for_authorization()
+        settings = load_settings()
+        install_path = self._install_path(item)
+        install_path.mkdir(parents=True, exist_ok=True)
         item.install_dir = str(install_path)
-        item.step = "Preparing Download"
-        item.log_tail.append(f"Starting download for {item.name} (AppID: {item.appid})...")
+        item.log_tail.append(f"Starting download for {item.name} (AppID: {item.appid})")
         item.log_tail.append(f"Destination: {install_path}")
         self._save_queue()
-        await self.broadcast("item_update", item.model_dump())
+        self.broadcast("item_update", item.model_dump())
 
         platform_type = settings.get("force_platform", "windows")
         username = settings.get("steamcmd_username", "").strip()
-        password = settings.get("steamcmd_password", "").strip()
+        password = settings.get("steamcmd_password", "")
         validate = settings.get("validate_downloads", True)
         custom_args = settings.get("custom_steamcmd_args", "").strip()
 
@@ -315,13 +336,13 @@ class DownloadQueueManager:
             username = session.get("account_name", "").strip()
 
         last_bytes = 0
-        last_time = time.time()
+        last_time = time.monotonic()
 
         def on_log(line: str):
             item.log_tail.append(line)
             if len(item.log_tail) > 80:
                 item.log_tail.pop(0)
-            asyncio.create_task(self.broadcast("item_log", {
+            self.broadcast("item_log", {
                 "id": item.id,
                 "line": line,
                 "progress": item.progress,
@@ -330,13 +351,17 @@ class DownloadQueueManager:
                 "eta_seconds": item.eta_seconds,
                 "current_bytes": item.current_bytes,
                 "total_bytes": item.total_bytes,
-            }))
+            })
 
         def on_progress(pct: float, cur_b: int, tot_b: int, step_name: str):
             nonlocal last_bytes, last_time
-            now = time.time()
+            now = time.monotonic()
             dt = now - last_time
-            if dt >= 0.8:
+            if cur_b < last_bytes:
+                item.speed_bps = 0
+                item.eta_seconds = 0
+                last_bytes, last_time = cur_b, now
+            elif dt >= 0.8:
                 if cur_b >= last_bytes and dt > 0:
                     item.speed_bps = (cur_b - last_bytes) / dt
                 if item.speed_bps > 0 and tot_b > cur_b:
@@ -350,56 +375,31 @@ class DownloadQueueManager:
             item.current_bytes = cur_b
             item.total_bytes = tot_b
             item.step = step_name
-            asyncio.create_task(self.broadcast("item_update", item.model_dump()))
+            self.broadcast("item_update", item.model_dump())
 
-        try:
-            item.step = "Connecting SteamCMD"
-            await self.broadcast("item_update", item.model_dump())
+        item.step = "Connecting to SteamCMD"
+        self.broadcast("item_update", item.model_dump())
+        await steam_session.run_download_job(
+            appid=item.appid,
+            install_path=install_path,
+            platform_type=platform_type,
+            validate=validate,
+            custom_args=custom_args,
+            username=username,
+            password=password,
+            log_callback=on_log,
+            progress_callback=on_progress,
+        )
 
-            await steam_session.run_download_job(
-                appid=item.appid,
-                install_path=install_path,
-                platform_type=platform_type,
-                validate=validate,
-                custom_args=custom_args,
-                username=username,
-                password=password,
-                log_callback=on_log,
-                progress_callback=on_progress
-            )
-
-            # Post-process
-            item.step = "Cleaning structure"
-            await post_process_game_directory(
-                install_path, 
-                appid=item.appid, 
-                log_tail=item.log_tail, 
-                require_goldberg=item.require_goldberg
-            )
-            item.status = "completed"
-            item.progress = 100.0
-            item.step = "Completed"
-            item.completed_at = time.time()
-            item.log_tail.append(f"App {item.appid} ({item.name}) downloaded and structured successfully in {install_path}.")
-
-        except asyncio.CancelledError:
-            item.status = "cancelled"
-            item.step = "Cancelled by user"
-            item.log_tail.append("Download cancelled by user.")
-            await steam_session.terminate_session()
-        except Exception as ex:
-            if item.status == "cancelled":
-                item.step = "Cancelled by user"
-                item.log_tail.append("Download cancelled by user.")
-            else:
-                item.status = "failed"
-                item.error = str(ex)
-                item.step = "Failed"
-                item.log_tail.append(f"Download failed: {ex}")
-        finally:
-            self.active_process = None
-            self._save_queue()
-            await self.broadcast("item_update", item.model_dump())
+        item.step = "Finalizing download"
+        self.broadcast("item_update", item.model_dump())
+        await post_process_game_directory(install_path, item.appid, item.log_tail, item.require_goldberg)
+        item.status = "completed"
+        item.progress = 100.0
+        item.speed_bps = item.eta_seconds = 0
+        item.step = "Completed"
+        item.completed_at = time.time()
+        item.log_tail.append(f"App {item.appid} downloaded to {install_path}.")
 
 
 queue_manager = DownloadQueueManager()

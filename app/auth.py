@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from app.config import DATA_DIR, load_settings, save_settings
+from app.storage import write_json
 
 SESSION_FILE = DATA_DIR / "session.json"
 STEAM_AUTH_API_BASE = "https://api.steampowered.com/IAuthenticationService"
@@ -27,13 +28,22 @@ class SteamAuthManager:
 
     def _save_persisted_session(self):
         if self._current_session:
-            with open(SESSION_FILE, "w", encoding="utf-8") as f:
-                json.dump(self._current_session, f, indent=2)
+            write_json(SESSION_FILE, self._current_session)
         elif SESSION_FILE.exists():
             SESSION_FILE.unlink(missing_ok=True)
 
     def get_session(self) -> Optional[Dict[str, Any]]:
         return self._current_session
+
+    @staticmethod
+    def public_session(session: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if session is None:
+            return None
+        return {
+            key: session[key]
+            for key in ("authenticated", "account_name", "steamid", "personaname", "avatar", "profileurl", "login_time")
+            if key in session
+        }
 
     def logout(self):
         self._current_session = None
@@ -148,10 +158,13 @@ class SteamAuthManager:
             self._current_session = session_data
             self._save_persisted_session()
 
-            # Also update steamcmd_username in settings if empty
             settings = load_settings()
-            if not settings.get("steamcmd_username") and account_name:
-                save_settings({"steamcmd_username": account_name})
+            if account_name and settings.get("steamcmd_username", "").lower() != account_name.lower():
+                save_settings({
+                    "steamcmd_username": account_name,
+                    "steamcmd_password": "",
+                    "steamcmd_authorized": False,
+                })
 
             return {
                 "status": "confirmed",

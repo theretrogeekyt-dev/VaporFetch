@@ -6,6 +6,8 @@ import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
+from app.storage import write_json
+
 
 # Paths
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -272,8 +274,7 @@ def load_settings() -> dict:
 def save_settings(new_settings: dict) -> dict:
     current = load_settings()
     current.update(new_settings)
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(current, f, indent=2)
+    write_json(SETTINGS_FILE, current)
     return current
 
 

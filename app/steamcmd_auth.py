@@ -8,7 +8,6 @@ from app.config import (
     load_settings, 
     save_settings, 
     sync_steam_credentials,
-    has_steam_credentials,
     extract_account_info_from_loginusers
 )
 from app.steam_session import steam_session
@@ -26,9 +25,16 @@ class SteamCmdAuthManager:
         sentry_files = list(STEAM_HOME_DIR.glob("ssfn*"))
         
         session_stat = steam_session.get_status()
-        is_authorized = steam_session.is_ready() or settings.get("steamcmd_authorized", False) or has_steam_credentials()
+        account_connected = steam_session.is_ready() and steam_session.current_user != "anonymous"
+        is_authorized = account_connected or bool(settings.get("steamcmd_username") and settings.get("steamcmd_authorized"))
         
-        if steam_session.is_ready():
+        if self.is_authorizing() and (not steam_session.is_alive() or steam_session.is_ready()):
+            current_state = "starting"
+            status_msg = self.status_message
+        elif self.state == "error":
+            current_state = self.state
+            status_msg = self.status_message
+        elif account_connected:
             current_state = "success"
             status_msg = "Device authorized and connected! Downloads will start without phone prompts."
         elif steam_session.is_alive():
@@ -43,7 +49,7 @@ class SteamCmdAuthManager:
 
         return {
             "authorized": is_authorized,
-            "connected": steam_session.is_ready(),
+            "connected": account_connected,
             "has_sentry": len(sentry_files) > 0 or is_authorized,
             "sentry_count": len(sentry_files),
             "state": current_state,
@@ -51,19 +57,29 @@ class SteamCmdAuthManager:
             "username": settings.get("steamcmd_username", "") or session_stat.get("username", ""),
             "has_password": bool(settings.get("steamcmd_password")),
             "logs": session_stat["logs"] or self.log_lines[-20:],
-            "session": current_session,
+            "session": auth_manager.public_session(current_session),
         }
+
+    def is_authorizing(self) -> bool:
+        return self._auth_task is not None and not self._auth_task.done()
+
+    async def wait_for_authorization(self):
+        if self.is_authorizing():
+            await asyncio.shield(asyncio.gather(self._auth_task, return_exceptions=True))
 
     async def start_authorization(self, username: Optional[str] = None, password: Optional[str] = None) -> Dict[str, Any]:
         """Starts persistent SteamCMD session authorization to authorize this device once and for all."""
         settings = load_settings()
         username = (username or settings.get("steamcmd_username", "")).strip()
-        password = (password or settings.get("steamcmd_password", "")).strip()
+        password = password or settings.get("steamcmd_password", "")
 
         if not username:
             raise ValueError("Steam username is required for authorization.")
         if not password:
             raise ValueError("Steam password is required for initial device authorization.")
+
+        if self.is_authorizing():
+            raise ValueError("A Steam Guard authorization is already in progress.")
 
         self.state = "starting"
         self.status_message = "Starting SteamCMD authorization..."
@@ -77,8 +93,6 @@ class SteamCmdAuthManager:
 
             try:
                 await steam_session.ensure_session(username, password, log_callback=_log)
-                self.state = "success"
-                self.status_message = "Device authorized successfully! One and done — future downloads will run without prompts."
                 save_settings({
                     "steamcmd_authorized": True,
                     "steamcmd_username": username,
@@ -92,18 +106,24 @@ class SteamCmdAuthManager:
                 persona = account_info.get("personaname", username) if account_info else username
 
                 from app.auth import auth_manager
+                previous = auth_manager.get_session() or {}
+                if previous.get("account_name", "").lower() != username.lower():
+                    previous = {}
                 session_data = {
+                    **previous,
                     "authenticated": True,
                     "account_name": username,
-                    "steamid": steamid,
-                    "personaname": persona,
+                    "steamid": steamid or previous.get("steamid", ""),
+                    "personaname": previous.get("personaname") or persona,
                     "login_time": int(time.time()),
                 }
 
                 if steamid:
                     try:
                         from app.steam_api import steam_api_client
-                        profile = await steam_api_client.get_player_summary(steamid=steamid)
+                        profile = await steam_api_client.get_player_summary(
+                            steamid=steamid, access_token=session_data.get("access_token")
+                        )
                         if profile:
                             session_data.update(profile)
                     except Exception as ex:
@@ -111,12 +131,14 @@ class SteamCmdAuthManager:
 
                 auth_manager._current_session = session_data
                 auth_manager._save_persisted_session()
+                self.state = "success"
+                self.status_message = "Steam Guard authorization saved."
+            except asyncio.CancelledError:
+                await steam_session.terminate_session()
+                raise
             except Exception as e:
                 self.state = "error"
                 self.status_message = str(e)
-
-        if self._auth_task and not self._auth_task.done():
-            self._auth_task.cancel()
 
         self._auth_task = asyncio.create_task(_run_auth())
         return self.get_status()
@@ -126,13 +148,13 @@ class SteamCmdAuthManager:
         await steam_session.submit_steam_guard_code(code)
         return self.get_status()
 
-    def cancel(self):
+    async def cancel(self):
         """Cancels any running authorization process."""
-        if self._auth_task and not self._auth_task.done():
+        if self.is_authorizing():
             self._auth_task.cancel()
-        asyncio.create_task(steam_session.terminate_session())
-        self.state = "idle"
-        self.status_message = "Authorization cancelled."
+            await asyncio.gather(self._auth_task, return_exceptions=True)
+            self.state = "idle"
+            self.status_message = "Authorization cancelled."
 
 
 steamcmd_auth_manager = SteamCmdAuthManager()

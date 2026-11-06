@@ -29,7 +29,6 @@ RUN dpkg --add-architecture i386 \
        libstdc++6:i386 \
        libcurl4:i386 \
        libbz2-1.0:i386 \
-       unzip \
        locales \
     && echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
     && locale-gen \
@@ -40,24 +39,15 @@ ENV LANG=en_US.UTF-8 \
 
 # Install SteamCMD directly from Valve and configure permissions
 RUN mkdir -p /steamcmd \
-    && curl -fsSL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar -zxvf - -C /steamcmd \
-    && chmod -R 777 /steamcmd \
-    && chmod -R +x /steamcmd \
+    && curl -fsSL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" -o /tmp/steamcmd.tar.gz \
+    && tar -zxf /tmp/steamcmd.tar.gz -C /steamcmd \
+    && rm /tmp/steamcmd.tar.gz \
     && mkdir -p /usr/games \
     && ln -sf /steamcmd/steamcmd.sh /usr/games/steamcmd \
-    && mkdir -p /home/steam \
-    && chmod -R 777 /home/steam
+    && mkdir -p /home/steam
 
 # Pre-populate and initialize SteamCMD during build so all runtime binaries exist
-RUN /steamcmd/steamcmd.sh +quit || true \
-    && chmod -R 777 /steamcmd \
-    && chmod -R +x /steamcmd
-
-# Pre-download Goldberg Steam Emulator binaries for offline play support
-RUN mkdir -p /app/assets/goldberg \
-    && (curl -fsSL "https://gitlab.com/Mr_Goldberg/goldberg_emulator/-/jobs/4247811310/artifacts/download" -o /tmp/goldberg.zip \
-        && unzip -q /tmp/goldberg.zip "steam_api.dll" "steam_api64.dll" -d /app/assets/goldberg/ 2>/dev/null \
-        && rm -rf /tmp/goldberg.zip || true) || true
+RUN /steamcmd/steamcmd.sh +quit || true
 
 # Set up Python virtual environment
 RUN python3 -m venv /opt/venv
@@ -82,6 +72,8 @@ COPY app /app/app
 VOLUME ["/downloads", "/app/data"]
 
 EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+    CMD curl --fail --silent http://127.0.0.1:8080/healthz || exit 1
 
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--timeout-graceful-shutdown", "5"]

@@ -5,6 +5,7 @@ services:
     # Or build locally if developing:
     # build: .
     container_name: vaporfetch
+    init: true
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -17,6 +18,8 @@ services:
       - STEAM_API_KEY=
       # Default platform: "windows" (recommended for NAS/Proton storage) or "linux"
       - FORCE_PLATFORM=windows
+      - VAPORFETCH_ADMIN_USER=${VAPORFETCH_ADMIN_USER:-admin}
+      - VAPORFETCH_ADMIN_PASSWORD=${VAPORFETCH_ADMIN_PASSWORD:-}
     volumes:
       # Persistent configuration, sessions, and Steam cache
       - ./data:/app/data

@@ -2,6 +2,7 @@ import json
 import httpx
 from typing import List, Dict, Any, Optional
 from app.config import load_settings, DATA_DIR
+from app.storage import write_json
 
 STEAM_API_BASE = "https://api.steampowered.com"
 
@@ -83,6 +84,8 @@ class SteamApiClient:
             res.raise_for_status()
             data = res.json().get("response", {})
 
+        if "games" not in data and data.get("game_count") != 0:
+            raise PermissionError("Steam did not return a visible game library.")
         raw_games = data.get("games", [])
         formatted_games = []
 
@@ -112,23 +115,17 @@ class SteamApiClient:
 
         # Save to local cache for instant offline/one-time persistence
         try:
-            cache_file = DATA_DIR / "games_cache.json"
-            with open(cache_file, "w", encoding="utf-8") as f:
-                json.dump(formatted_games, f)
-        except Exception:
+            write_json(DATA_DIR / f"games_cache_{int(steamid)}.json", formatted_games)
+        except (OSError, ValueError):
             pass
 
         return formatted_games
 
-    def get_cached_games(self) -> List[Dict[str, Any]]:
-        cache_file = DATA_DIR / "games_cache.json"
-        if cache_file.exists():
-            try:
-                with open(cache_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception:
-                pass
-        return []
+    def get_cached_games(self, steamid: str) -> Optional[List[Dict[str, Any]]]:
+        try:
+            return json.loads((DATA_DIR / f"games_cache_{int(steamid)}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
 
 
 steam_api_client = SteamApiClient()

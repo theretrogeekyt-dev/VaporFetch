@@ -1,0 +1,32 @@
+name: Verify VaporFetch
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - run: |
+          bash -n entrypoint.sh
+          for script in app/static/*.js; do node --check "$script" || exit 1; done
+      - name: Build and boot the Docker image
+        run: |
+          docker build -t vaporfetch:ci .
+          docker run -d --name vaporfetch-ci -p 127.0.0.1:8080:8080 vaporfetch:ci
+          if ! curl --fail --silent --show-error --retry 15 --retry-all-errors --retry-delay 2 --max-time 5 http://127.0.0.1:8080/healthz; then
+            docker logs vaporfetch-ci
+            exit 1
+          fi

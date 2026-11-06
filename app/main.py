@@ -1,39 +1,96 @@
 import os
+import base64
+import binascii
+import hmac
+import json
 import time
 import shutil
 import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
-from typing import List, Dict, Any, Optional
+from typing import List, Literal, Optional
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.config import (
     DOWNLOAD_DIR,
     DATA_DIR,
     STEAMCMD_BIN,
+    APP_VERSION,
+    APP_COMMIT_SHA,
     load_settings,
     save_settings
 )
 from app.auth import auth_manager
 from app.steam_api import steam_api_client
 from app.queue_manager import queue_manager
+from app.queue_manager import find_existing_install, safe_install_path
 from app.steamcmd_auth import steamcmd_auth_manager
+from app.steam_session import steam_session
+
+ADMIN_USER = os.getenv("VAPORFETCH_ADMIN_USER", "admin")
+ADMIN_PASSWORD = os.getenv("VAPORFETCH_ADMIN_PASSWORD", "")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Resume any pending downloads on startup
     queue_manager.start_worker()
-    yield
+    try:
+        yield
+    finally:
+        await queue_manager.stop_worker()
+        await steamcmd_auth_manager.cancel()
+        await steam_session.terminate_session()
 
-app = FastAPI(title="VaporFetch", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="VaporFetch", version=APP_VERSION, lifespan=lifespan)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+@app.middleware("http")
+async def protect_dashboard(request: Request, call_next):
+    if request.url.path == "/healthz":
+        return await call_next(request)
+
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        origin = request.headers.get("origin")
+        host = request.headers.get("host", "")
+        try:
+            foreign_origin = origin is not None and urlsplit(origin).netloc.lower() != host.lower()
+        except ValueError:
+            foreign_origin = True
+        if foreign_origin or request.headers.get("sec-fetch-site") == "cross-site":
+            return JSONResponse({"detail": "Cross-origin requests are blocked."}, status_code=403)
+
+    if ADMIN_PASSWORD:
+        scheme, _, encoded = request.headers.get("authorization", "").partition(" ")
+        expected = f"{ADMIN_USER}:{ADMIN_PASSWORD}".encode()
+        try:
+            valid = scheme.lower() == "basic" and hmac.compare_digest(
+                base64.b64decode(encoded, validate=True), expected
+            )
+        except (ValueError, binascii.Error):
+            valid = False
+        if not valid:
+            return JSONResponse(
+                {"detail": "VaporFetch administrator sign-in required."},
+                status_code=401,
+                headers={"WWW-Authenticate": 'Basic realm="VaporFetch", charset="UTF-8"'},
+            )
+
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/healthz", include_in_schema=False)
+async def health():
+    return {"status": "ok"}
 
 
 # Pydantic Request Models
@@ -41,8 +98,13 @@ class PollRequest(BaseModel):
     client_id: str
     request_id: str
 
+class QueueGame(BaseModel):
+    appid: int = Field(gt=0, le=4294967295)
+    name: Optional[str] = Field(default=None, max_length=512)
+
+
 class QueueAddRequest(BaseModel):
-    games: List[Dict[str, Any]]
+    games: List[QueueGame] = Field(max_length=5000)
     require_goldberg: Optional[bool] = False
 
 class SteamCmdAuthRequest(BaseModel):
@@ -55,7 +117,7 @@ class SteamCmdCodeRequest(BaseModel):
 
 class SettingsUpdateRequest(BaseModel):
     steam_api_key: Optional[str] = None
-    force_platform: Optional[str] = None
+    force_platform: Optional[Literal["windows", "linux", "macos"]] = None
     validate_downloads: Optional[bool] = None
     enable_goldberg: Optional[bool] = None
     steamcmd_username: Optional[str] = None
@@ -120,12 +182,6 @@ async def serve_desktop(request: Request):
     return _render_html("index.html", set_cookie="desktop")
 
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    from app.steam_session import steam_session
-    await steam_session.terminate_session()
-
-
 # ---------------- Auth Endpoints ---------------- #
 
 @app.post("/api/auth/qr/begin")
@@ -154,6 +210,8 @@ async def poll_qr_auth(req: PollRequest):
                     session.update(profile)
                     auth_manager._current_session = session
                     auth_manager._save_persisted_session()
+        if result.get("session"):
+            result = {**result, "session": auth_manager.public_session(result["session"])}
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Polling QR auth failed: {str(e)}")
@@ -204,7 +262,7 @@ async def get_session():
 
     return {
         "authenticated": True,
-        "session": session,
+        "session": auth_manager.public_session(session),
         "has_password": has_password,
         "steamcmd_authorized": steamcmd_authorized,
         "setup_complete": bool(session.get("authenticated") and (has_password or steamcmd_authorized))
@@ -213,6 +271,11 @@ async def get_session():
 
 @app.post("/api/auth/logout")
 async def logout():
+    if queue_manager.active_item:
+        raise HTTPException(status_code=409, detail="Cancel or finish the active download before signing out.")
+    await steamcmd_auth_manager.cancel()
+    await steam_session.terminate_session()
+    save_settings({"steamcmd_username": "", "steamcmd_password": "", "steamcmd_authorized": False})
     auth_manager.logout()
     return {"success": True}
 
@@ -225,6 +288,8 @@ async def get_steamcmd_auth_status():
 
 @app.post("/api/auth/steamcmd/authorize")
 async def start_steamcmd_auth(req: SteamCmdAuthRequest):
+    if queue_manager.active_item:
+        raise HTTPException(status_code=409, detail="Cancel or finish the active download before authorizing SteamCMD.")
     try:
         if req.api_key and req.api_key.strip():
             save_settings({"steam_api_key": req.api_key.strip()})
@@ -249,7 +314,7 @@ async def submit_steamcmd_code(req: SteamCmdCodeRequest):
 
 @app.post("/api/auth/steamcmd/cancel")
 async def cancel_steamcmd_auth():
-    steamcmd_auth_manager.cancel()
+    await steamcmd_auth_manager.cancel()
     return {"success": True}
 
 
@@ -284,19 +349,19 @@ async def get_owned_games():
                 pass
 
         # Fallback to local cached games
-        cached = steam_api_client.get_cached_games()
-        if cached:
+        cached = steam_api_client.get_cached_games(steamid)
+        if cached is not None:
             return {"count": len(cached), "games": cached, "cached": True}
 
         raise HTTPException(
             status_code=403, 
             detail="Steam Web API request unauthorized. Please configure a valid Steam Web API Key in Settings or make profile game details public."
         )
-    except Exception as e:
-        cached = steam_api_client.get_cached_games()
-        if cached:
+    except Exception:
+        cached = steam_api_client.get_cached_games(steamid)
+        if cached is not None:
             return {"count": len(cached), "games": cached, "cached": True}
-        raise HTTPException(status_code=500, detail=f"Failed to fetch games library: {str(e)}")
+        raise HTTPException(status_code=502, detail="Steam did not return the game library. Please try again.")
 
 
 # ---------------- Queue & Downloader Endpoints ---------------- #
@@ -310,7 +375,10 @@ async def get_queue():
 async def add_to_queue(req: QueueAddRequest):
     if not req.games:
         raise HTTPException(status_code=400, detail="No games specified.")
-    added = queue_manager.add_to_queue(req.games, require_goldberg=bool(req.require_goldberg))
+    added = queue_manager.add_to_queue(
+        [game.model_dump(exclude_none=True) for game in req.games], require_goldberg=bool(req.require_goldberg)
+    )
+    queue_manager.broadcast("queue_update", queue_manager.get_summary())
     return {"added_count": len(added), "added": [i.model_dump() for i in added]}
 
 
@@ -319,6 +387,7 @@ async def delete_queue_item(item_id: str):
     removed = queue_manager.remove_from_queue(item_id)
     if not removed:
         raise HTTPException(status_code=404, detail="Item not found in queue.")
+    queue_manager.broadcast("queue_update", queue_manager.get_summary())
     return {"success": True}
 
 
@@ -327,25 +396,26 @@ async def retry_queue_item(item_id: str):
     retried = queue_manager.retry_item(item_id)
     if not retried:
         raise HTTPException(status_code=404, detail="Item not found or cannot be retried.")
+    queue_manager.broadcast("queue_update", queue_manager.get_summary())
     return {"success": True}
 
 
 @app.post("/api/queue/clear-completed")
 async def clear_completed_queue():
     queue_manager.clear_completed()
+    queue_manager.broadcast("queue_update", queue_manager.get_summary())
     return {"success": True}
 
 
 @app.get("/api/queue/stream")
 async def stream_queue(request: Request):
     """Server-Sent Events (SSE) endpoint providing live download progress and console logs."""
-    sub_queue = await queue_manager.subscribe()
-
     async def event_generator():
+        sub_queue = await queue_manager.subscribe()
         try:
             # First send current queue summary
             init_msg = {"event": "queue_update", "data": queue_manager.get_summary()}
-            yield f"data: {json_dumps(init_msg)}\n\n"
+            yield f"data: {json.dumps(init_msg)}\n\n"
 
             while True:
                 if await request.is_disconnected():
@@ -368,11 +438,6 @@ async def stream_queue(request: Request):
             "X-Accel-Buffering": "no"
         }
     )
-
-import json
-def json_dumps(obj):
-    return json.dumps(obj)
-
 
 # ---------------- System & Settings Endpoints ---------------- #
 
@@ -407,18 +472,20 @@ async def get_system_status():
 
 @app.get("/api/settings")
 async def get_settings():
-    settings = load_settings()
-    # Mask password
-    masked = settings.copy()
-    if masked.get("steamcmd_password"):
-        masked["steamcmd_password"] = "******"
-    return masked
+    return public_settings(load_settings())
+
+
+def public_settings(settings: dict) -> dict:
+    return {
+        key: "******" if key in ("steamcmd_password", "steam_api_key") and value else value
+        for key, value in settings.items()
+    }
 
 
 @app.post("/api/settings")
 async def update_settings(req: SettingsUpdateRequest):
     updates = {}
-    if req.steam_api_key is not None:
+    if req.steam_api_key is not None and req.steam_api_key != "******":
         updates["steam_api_key"] = req.steam_api_key.strip()
     if req.force_platform is not None:
         updates["force_platform"] = req.force_platform
@@ -435,11 +502,7 @@ async def update_settings(req: SettingsUpdateRequest):
     if req.custom_steamcmd_args is not None:
         updates["custom_steamcmd_args"] = req.custom_steamcmd_args.strip()
 
-    updated = save_settings(updates)
-    masked = updated.copy()
-    if masked.get("steamcmd_password"):
-        masked["steamcmd_password"] = "******"
-    return masked
+    return public_settings(save_settings(updates))
 
 
 # ---------------- Goldberg Offline Wrapper Endpoints ---------------- #
@@ -447,26 +510,14 @@ async def update_settings(req: SettingsUpdateRequest):
 from app.goldberg import goldberg_manager
 
 def _find_game_dir(appid: int) -> Optional[Path]:
-    for item in queue_manager.items:
-        if item.appid == appid and item.install_dir and Path(item.install_dir).exists():
-            return Path(item.install_dir)
-    try:
-        if DOWNLOAD_DIR.exists():
-            for child in DOWNLOAD_DIR.iterdir():
-                if not child.is_dir():
-                    continue
-                if (child / f"appmanifest_{appid}.acf").exists():
-                    return child
-                appid_file = child / "steam_appid.txt"
-                if appid_file.exists():
-                    try:
-                        if appid_file.read_text(encoding="utf-8", errors="ignore").strip() == str(appid):
-                            return child
-                    except Exception:
-                        pass
-    except Exception:
-        pass
-    return None
+    if any(item.appid == appid and item.status in ("running", "cancelling") for item in queue_manager.items):
+        raise HTTPException(status_code=409, detail="Wait for this download to finish before managing its files.")
+    for item in reversed(queue_manager.items):
+        if item.appid == appid and item.status == "completed" and item.install_dir:
+            path = Path(item.install_dir)
+            if safe_install_path(path) and path.is_dir():
+                return path
+    return find_existing_install(appid)
 
 @app.get("/api/games/{appid}/goldberg")
 async def get_goldberg_status(appid: int):
@@ -486,6 +537,9 @@ async def apply_goldberg(appid: int):
     settings = load_settings()
     account_name = settings.get("steamcmd_username") or "Player"
     await goldberg_manager.ensure_binaries()
+    target_dir = _find_game_dir(appid)
+    if target_dir is None:
+        raise HTTPException(status_code=404, detail="Downloaded game folder not found in /downloads.")
 
     if not goldberg_manager.is_available():
         raise HTTPException(
@@ -535,7 +589,6 @@ async def trigger_goldberg_download():
 # ---------------- System Version & Container Updater Endpoints ---------------- #
 
 from app.updater import container_updater
-from app.config import APP_VERSION, APP_COMMIT_SHA
 
 @app.get("/api/system/version")
 async def get_system_version():
@@ -544,15 +597,18 @@ async def get_system_version():
         "commit": APP_COMMIT_SHA,
         "short_commit": APP_COMMIT_SHA[:7] if APP_COMMIT_SHA != "dev" else "dev",
         "is_dev": APP_COMMIT_SHA.lower() in ("dev", "", "unknown"),
-        "docker_socket_available": container_updater.is_docker_socket_available(),
+        "docker_socket_available": bool(ADMIN_PASSWORD) and container_updater.is_docker_socket_available(),
     }
 
 @app.get("/api/system/update/check")
 async def check_container_update(force: bool = False):
-    return await container_updater.check_for_updates(force=force)
+    update = await container_updater.check_for_updates(force=force)
+    return {**update, "can_auto_update": bool(ADMIN_PASSWORD) and update["can_auto_update"]}
 
 @app.post("/api/system/update/apply")
 async def apply_container_update():
+    if not ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Set VAPORFETCH_ADMIN_PASSWORD to enable in-app container updates.")
     try:
         return await container_updater.apply_update()
     except Exception as e:

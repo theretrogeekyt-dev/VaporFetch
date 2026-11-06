@@ -108,7 +108,7 @@ async function checkAuthSession() {
 
       // Check if one-time password setup is complete
       const banner = document.getElementById("setupBanner");
-      if (!data.has_password) {
+      if (!data.setup_complete) {
         if (banner) banner.style.display = "flex";
       } else {
         if (banner) banner.style.display = "none";
@@ -125,6 +125,7 @@ async function checkAuthSession() {
 }
 
 function renderUserProfile(session) {
+  document.getElementById("desktopLibraryToolbar").style.display = "flex";
   document.getElementById("loginBtn").style.display = "none";
   const userCard = document.getElementById("userCard");
   userCard.style.display = "flex";
@@ -141,6 +142,7 @@ function renderUserProfile(session) {
 }
 
 function renderUnauthenticated() {
+  document.getElementById("desktopLibraryToolbar").style.display = "none";
   document.getElementById("loginBtn").style.display = "inline-flex";
   document.getElementById("userCard").style.display = "none";
   document.getElementById("gamesGrid").innerHTML = "";
@@ -153,12 +155,12 @@ function renderUnauthenticated() {
 
 async function logout() {
   try {
-    await fetch("/api/auth/logout", { method: "POST" });
+    await requestJson("/api/auth/logout", { method: "POST" });
     currentUser = null;
     allGames = [];
     filteredGames = [];
     selectedGames.clear();
-    updateBatchBar();
+    updateSelectionUI();
     renderUnauthenticated();
     showToast("Logged out of Steam.");
   } catch (e) {
@@ -412,7 +414,7 @@ async function pollSteamCmdAuthStatus() {
       if (codeGroup) codeGroup.style.display = "none";
     }
 
-    if (data.state === "success" || data.authorized) {
+    if (data.state === "success") {
       clearInterval(steamCmdAuthPollTimer);
       steamCmdAuthPollTimer = null;
       if (iconEl) iconEl.textContent = "✅";
@@ -433,7 +435,7 @@ async function pollSteamCmdAuthStatus() {
       if (titleEl) titleEl.textContent = "Authorization Failed";
       if (subtitleEl) subtitleEl.textContent = data.status_message || "Could not complete SteamCMD login.";
       if (infoText) {
-        infoText.innerHTML = `<strong>Error:</strong> ${data.status_message || "Steam rejected the login attempt. Please verify your password in Settings."}`;
+        infoText.textContent = `Error: ${data.status_message || "Steam rejected the login attempt. Please verify your password in Settings."}`;
       }
       if (pulseDot) pulseDot.style.display = "none";
     }
@@ -568,13 +570,13 @@ async function loadLibrary() {
     filteredGames = [...allGames];
 
     loading.style.display = "none";
-    if (allGames.length === 0) {
-      empty.style.display = "block";
-    } else {
-      handleSort();
-    }
+    handleSort();
+    if (data.cached) showToast("Showing the last saved Steam library.");
   } catch (e) {
     loading.style.display = "none";
+    empty.style.display = "block";
+    empty.querySelector("h2").textContent = "Library unavailable";
+    empty.querySelector("p").textContent = e.message;
     showToast(e.message, true);
   }
 }
@@ -625,9 +627,12 @@ function renderGames() {
   const grid = document.getElementById("gamesGrid");
   const empty = document.getElementById("libraryEmpty");
 
-  if (filteredGames.length === 0 && allGames.length > 0) {
+  if (filteredGames.length === 0) {
     grid.innerHTML = "";
     empty.style.display = "block";
+    empty.querySelector("h2").textContent = "No games found";
+    empty.querySelector("p").textContent = allGames.length ? "Try a different title or App ID." : "Steam returned an empty library.";
+    updateSelectionUI();
     return;
   }
   empty.style.display = "none";
@@ -640,17 +645,17 @@ function renderGames() {
     return `
       <div class="game-card ${isSelected ? 'selected' : ''}" 
            id="game-card-${game.appid}" 
-           onclick="toggleGameCard(event, ${game.appid}, '${escapeHtml(game.name)}')">
+           data-appid="${Number(game.appid)}">
         <div class="game-banner-box">
           <input type="checkbox" 
                  class="game-select-checkbox" 
                  ${isSelected ? 'checked' : ''} 
-                 onclick="event.stopPropagation(); toggleGameSelect(${game.appid}, '${escapeHtml(game.name)}', this.checked)">
+                 aria-label="Select ${escapeHtml(game.name)}">
           <img class="game-banner" 
-               src="${game.header_url}" 
+               src="${escapeHtml(game.header_url)}"
                alt="${escapeHtml(game.name)}" 
                loading="lazy"
-               onerror="this.onerror=null; this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 460 215%22 fill=%22%23172033%22><rect width=%22100%25%22 height=%22100%25%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%2366c0f4%22 font-family=%22sans-serif%22 font-size=%2222%22 text-anchor=%22middle%22 dominant-baseline=%22middle%22>${escapeHtml(game.name)}</text></svg>'">
+               onerror="this.onerror=null; this.src='/static/vaporfetch.svg'">
         </div>
         <div class="game-details">
           <div class="game-title" title="${escapeHtml(game.name)}">${escapeHtml(game.name)}</div>
@@ -672,12 +677,13 @@ function escapeHtml(str) {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 
-function toggleGameCard(event, appid, name) {
-  // If clicking on links/buttons, return
-  if (event.target.tagName === "INPUT") return;
-  const isSelected = selectedGames.has(appid);
-  toggleGameSelect(appid, name, !isSelected);
-}
+document.getElementById("gamesGrid").addEventListener("click", (event) => {
+  const card = event.target.closest(".game-card");
+  if (!card) return;
+  const appid = Number(card.dataset.appid);
+  const game = allGames.find((entry) => entry.appid === appid);
+  if (game) toggleGameSelect(appid, game.name, !selectedGames.has(appid));
+});
 
 function toggleGameSelect(appid, name, shouldSelect) {
   if (shouldSelect) {
@@ -808,6 +814,7 @@ function renderActiveCard(item) {
 
   activeSection.style.display = "block";
   activeDownloadItem = item;
+  document.getElementById("cancelDownloadBtn").disabled = item.status === "cancelling";
 
   document.getElementById("activeGameTitle").textContent = item.name;
   document.getElementById("activeAppId").textContent = `AppID: ${item.appid}`;
@@ -903,7 +910,7 @@ function renderHistoryList(items) {
           </div>
         </div>
         <div style="display:flex; gap: 6px;">
-          ${isCompleted ? `<button class="btn btn-xs btn-outline" onclick="manageGameGoldberg(${item.appid}, '${escapeHtml(item.name)}')" title="Configure Offline Play (Goldberg)">Offline Wrapper</button>` : ''}
+          ${isCompleted ? `<button class="btn btn-xs btn-outline" data-wrapper-appid="${Number(item.appid)}" data-wrapper-name="${escapeHtml(item.name)}" title="Configure Offline Play (Goldberg)">Offline Wrapper</button>` : ''}
           ${!isCompleted ? `<button class="btn btn-xs btn-secondary" onclick="retryQueueItem('${item.id}')">Retry</button>` : ''}
           <button class="btn btn-xs btn-outline" onclick="removeQueueItem('${item.id}')">Dismiss</button>
         </div>
@@ -914,7 +921,7 @@ function renderHistoryList(items) {
 
 async function removeQueueItem(id) {
   try {
-    await fetch(`/api/queue/${id}`, { method: "DELETE" });
+    await requestJson(`/api/queue/${id}`, { method: "DELETE" });
     fetchQueue();
   } catch (e) {
     showToast("Error removing item: " + e.message, true);
@@ -923,7 +930,7 @@ async function removeQueueItem(id) {
 
 async function retryQueueItem(id) {
   try {
-    await fetch(`/api/queue/${id}/retry`, { method: "POST" });
+    await requestJson(`/api/queue/${id}/retry`, { method: "POST" });
     fetchQueue();
   } catch (e) {
     showToast("Error retrying item: " + e.message, true);
@@ -932,7 +939,7 @@ async function retryQueueItem(id) {
 
 async function clearCompletedQueue() {
   try {
-    await fetch("/api/queue/clear-completed", { method: "POST" });
+    await requestJson("/api/queue/clear-completed", { method: "POST" });
     fetchQueue();
   } catch (e) {
     showToast("Error clearing completed: " + e.message, true);
@@ -963,10 +970,6 @@ function initSSE() {
     }
   };
 
-  sseConnection.onerror = () => {
-    // Retry connection automatically
-    setTimeout(initSSE, 5000);
-  };
 }
 
 function handleSSEMessage(msg) {
@@ -975,8 +978,8 @@ function handleSSEMessage(msg) {
 
   if (evt === "queue_update") {
     renderQueue(data);
-  } else if (evt === "item_update") {
-    fetchQueue();
+  } else if (evt === "item_update" && data.status === "running") {
+    renderActiveCard(data);
   } else if (evt === "item_log") {
     // Update live metrics on active card
     if (activeDownloadItem && activeDownloadItem.id === data.id) {
@@ -1131,6 +1134,11 @@ async function saveSettings(event) {
     showToast(e.message, true);
   }
 }
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-wrapper-appid]");
+  if (button) manageGameGoldberg(Number(button.dataset.wrapperAppid), button.dataset.wrapperName);
+});
 
 async function manageGameGoldberg(appid, name) {
   try {
@@ -1343,3 +1351,5 @@ async function triggerContainerUpdate() {
 }
 
 
+
+setupAppIdForm(fetchQueue);

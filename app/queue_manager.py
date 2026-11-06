@@ -326,7 +326,6 @@ class DownloadQueueManager:
 
         platform_type = settings.get("force_platform", "windows")
         username = settings.get("steamcmd_username", "").strip()
-        password = settings.get("steamcmd_password", "")
         validate = settings.get("validate_downloads", True)
         custom_args = settings.get("custom_steamcmd_args", "").strip()
 
@@ -386,7 +385,6 @@ class DownloadQueueManager:
             validate=validate,
             custom_args=custom_args,
             username=username,
-            password=password,
             log_callback=on_log,
             progress_callback=on_progress,
         )

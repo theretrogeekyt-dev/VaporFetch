@@ -266,7 +266,7 @@ async def get_session():
         "session": auth_manager.public_session(session),
         "has_password": has_password,
         "steamcmd_authorized": steamcmd_authorized,
-        "setup_complete": bool(session.get("authenticated") and (has_password or steamcmd_authorized))
+        "setup_complete": bool(session.get("authenticated") and steamcmd_authorized)
     }
 
 

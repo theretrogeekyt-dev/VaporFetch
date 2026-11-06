@@ -157,7 +157,7 @@ for command in sys.stdin:
 
 
 class SteamCmdTests(unittest.IsolatedAsyncioTestCase):
-    async def start_fake_login(self, script, **kwargs):
+    def fake_steamcmd(self, script):
         spawn = asyncio.create_subprocess_exec
 
         async def spawn_fake(*args, **options):
@@ -174,6 +174,10 @@ class SteamCmdTests(unittest.IsolatedAsyncioTestCase):
         launch = patch("app.steam_session.asyncio.create_subprocess_exec", spawn_fake)
         launch.start()
         self.addCleanup(launch.stop)
+        return worker
+
+    async def start_fake_login(self, script, **kwargs):
+        worker = self.fake_steamcmd(script)
         task = asyncio.create_task(worker.ensure_session("test_user", "test_password", **kwargs))
 
         async def stop():
@@ -222,6 +226,74 @@ sys.stdin.readline()
 """, guard_code="ABC23")
         self.assertTrue(await asyncio.wait_for(task, 5))
         self.assertIn("set_steam_guard_code [redacted]", worker.log_history)
+
+    async def test_downloads_use_saved_login_after_device_authorization(self):
+        with tempfile.TemporaryDirectory() as folder:
+            token = Path(folder) / "cached"
+            worker = self.fake_steamcmd(f"""
+from pathlib import Path
+import sys
+
+token = Path({str(token)!r})
+print("Steam>", end="", flush=True)
+target = False
+for line in sys.stdin:
+    command = line.strip()
+    if command.startswith("force_install_dir "):
+        target = True
+    elif command.startswith("login "):
+        if target:
+            assert token.exists()
+            assert command == "login test_user"
+            print("Logging in using cached credentials.", flush=True)
+        else:
+            assert command == "login test_user test_password"
+        print("Waiting for user info...OK", flush=True)
+    elif command.startswith("app_update "):
+        appid = command.split()[1]
+        print(f"Success! App '{{appid}}' fully installed.", flush=True)
+    elif command == "quit":
+        if not target:
+            token.touch()
+        break
+""")
+            with patch("app.steam_session.load_settings", return_value={
+                "steamcmd_username": "test_user", "steamcmd_password": "test_password",
+            }):
+                async with asyncio.timeout(8):
+                    self.assertTrue(await worker.ensure_session("test_user", "test_password"))
+                    for appid in (740, 123):
+                        self.assertTrue(await worker.run_download_job(
+                            appid, Path(folder) / str(appid), username="test_user"
+                        ))
+                        self.assertIn("Logging in using cached credentials.", worker.log_history)
+
+    async def test_missing_cached_login_stops_without_sending_a_password(self):
+        with tempfile.TemporaryDirectory() as folder:
+            received_input = Path(folder) / "unexpected"
+            worker = self.fake_steamcmd(f"""
+from pathlib import Path
+import sys
+
+print("Steam>", end="", flush=True)
+for line in sys.stdin:
+    if line.startswith("login "):
+        assert line.strip() == "login test_user"
+        print("password:", end="", flush=True)
+        if sys.stdin.readline():
+            Path({str(received_input)!r}).touch()
+        break
+""")
+            with patch("app.steam_session.load_settings", return_value={
+                "steamcmd_username": "test_user", "steamcmd_password": "test_password",
+            }), patch("app.steam_session.save_settings") as save:
+                with self.assertRaisesRegex(RuntimeError, "SteamCMD authorization required"):
+                    await asyncio.wait_for(worker.run_download_job(
+                        740, Path(folder), username="test_user"
+                    ), 5)
+                save.assert_called_once_with({"steamcmd_authorized": False})
+            self.assertFalse(received_input.exists())
+            self.assertIsNone(worker.process)
 
     async def test_install_path_precedes_login_and_success_matches_appid(self):
         spawn = asyncio.create_subprocess_exec

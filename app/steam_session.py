@@ -24,6 +24,8 @@ GUARD_CODE_PROMPT = re.compile(
     r"(?:steam guard|authenticator|two[- ]factor).*code[^:]*:\s*$|\benter (?:the )?code:\s*$",
     re.IGNORECASE,
 )
+PASSWORD_PROMPT = re.compile(r"(?:\bpassword|\benter password for user[^:]*)\s*:\s*$", re.IGNORECASE)
+CACHED_AUTH_REQUIRED = "SteamCMD authorization required. Open Settings, authorize SteamCMD, then retry the download."
 DOWNLOAD_OUTPUT_TIMEOUT = 15 * 60
 
 
@@ -84,7 +86,7 @@ class SteamCmdSessionWorker:
                     break
                 parts = re.split(r"[\r\n]+", buffer + chunk.decode("utf-8", errors="replace"))
                 buffer = parts.pop()
-                if buffer.rstrip().endswith("Steam>") or GUARD_CODE_PROMPT.search(buffer):
+                if buffer.rstrip().endswith("Steam>") or GUARD_CODE_PROMPT.search(buffer) or PASSWORD_PROMPT.search(buffer):
                     parts.append(buffer)
                     buffer = ""
                 for line in parts:
@@ -111,13 +113,14 @@ class SteamCmdSessionWorker:
         *, install_path: Optional[Path] = None, platform_type: str = "windows", guard_code: str = "",
     ) -> bool:
         """
-        Ensures a persistent SteamCMD process is running and logged in.
-        If already logged in as the requested user, returns immediately with 0 prompts.
+        Reuse a matching process or sign in for the requested destination.
+        Download sessions use SteamCMD's saved login. Passwords are used during device setup.
         """
         async with self._lock:
             settings = load_settings()
             clean_user = (username or settings.get("steamcmd_username", "") or "anonymous").strip()
-            clean_pass = password if password is not None else settings.get("steamcmd_password", "")
+            cached_login = install_path is not None and clean_user.lower() != "anonymous"
+            clean_pass = "" if cached_login else (password or "")
             if not re.fullmatch(r"[A-Za-z0-9_]+", clean_user):
                 raise ValueError("Enter a valid Steam account name.")
             if "\n" in clean_pass or "\r" in clean_pass:
@@ -152,8 +155,8 @@ class SteamCmdSessionWorker:
             if log_callback:
                 log_callback(self.status_message)
 
-            # Sync and configure autologin beforehand
-            if clean_user != "anonymous":
+            # Let SteamCMD read its own saved login without rewriting the cache for each game.
+            if clean_user.lower() != "anonymous" and not cached_login:
                 configure_steam_autologin(clean_user)
             sync_steam_credentials()
 
@@ -235,7 +238,10 @@ class SteamCmdSessionWorker:
                 login_line = f"login {clean_user}\n"
 
             if log_callback:
-                log_callback(f">> Authenticating '{clean_user}' in persistent session...")
+                if cached_login:
+                    log_callback(f"Signing in as '{clean_user}' with SteamCMD's saved authorization.")
+                else:
+                    log_callback(f"Signing in as '{clean_user}'…")
 
             if guard_code:
                 # SteamCMD accepts a code before the login command in its interactive console.
@@ -264,20 +270,38 @@ class SteamCmdSessionWorker:
                     log_callback(line)
 
                 lower_line = line.lower()
+                waiting_for_approval = (
+                    "confirm the login in the steam mobile app" in lower_line
+                    or ("waiting for confirmation" in lower_line and not lower_line.endswith("ok")
+                        and "failed" not in lower_line)
+                )
+                waiting_for_code = bool(GUARD_CODE_PROMPT.search(line))
+
+                if cached_login and (
+                    waiting_for_approval or waiting_for_code or PASSWORD_PROMPT.search(line)
+                    or any(reason in lower_line for reason in (
+                        "invalid password", "account logon denied", "account login denied",
+                        "no cached credentials", "no saved credentials", "cached credentials not found",
+                        "cached credentials are invalid", "invalid login auth code",
+                    ))
+                ):
+                    # SteamCMD can be reading a password or code at this point.
+                    await self.terminate_session(graceful=False)
+                    current_settings = load_settings()
+                    if current_settings.get("steamcmd_username", "").lower() == clean_user.lower():
+                        save_settings({"steamcmd_authorized": False})
+                    raise RuntimeError(CACHED_AUTH_REQUIRED)
 
                 if "waiting for confirmation" in lower_line and lower_line.endswith("ok"):
                     self.state = "starting"
                     self.status_message = "Steam Guard approved. Finishing Steam sign-in…"
-                elif (
-                    "confirm the login in the steam mobile app" in lower_line
-                    or ("waiting for confirmation" in lower_line and "failed" not in lower_line)
-                ):
+                elif waiting_for_approval:
                     self.state = "waiting_approval"
                     self.status_message = "Steam is waiting for approval. Open Steam Guard in the Steam Mobile app or use a code below."
                     if log_callback:
                         log_callback(f">> {self.status_message}")
 
-                elif GUARD_CODE_PROMPT.search(line):
+                elif waiting_for_code:
                     self.state = "waiting_code"
                     self.status_message = "SteamCMD is asking for a Steam Guard code. Use the current code from the app or your Steam email."
                     if log_callback:
@@ -361,18 +385,14 @@ class SteamCmdSessionWorker:
         validate: bool = True,
         custom_args: str = "",
         username: str = "",
-        password: str = "",
         log_callback: Optional[Callable[[str], None]] = None,
         progress_callback: Optional[Callable[[float, int, int, str], None]] = None
     ) -> bool:
-        """
-        Executes a game download job through the persistent SteamCMD session.
-        Pipes commands directly to stdin without restarting SteamCMD or triggering mobile prompts.
-        """
+        """Run a game download using SteamCMD's saved authorization."""
         # Ensure session is authenticated
         try:
             await self.ensure_session(
-                username, password, log_callback, install_path=install_path, platform_type=platform_type
+                username, log_callback=log_callback, install_path=install_path, platform_type=platform_type
             )
             return await self._download(appid, validate, custom_args, log_callback, progress_callback)
         except (asyncio.CancelledError, Exception):
@@ -443,27 +463,33 @@ class SteamCmdSessionWorker:
                 raise RuntimeError("This app requires a Steam account that owns it (No subscription).")
             if "disk write failure" in lower_line:
                 raise RuntimeError("SteamCMD could not write to the download destination.")
-            if "enter password for user" in lower_line or "steamcmd has been disconnected" in lower_line:
+            if PASSWORD_PROMPT.search(line):
+                await self.terminate_session(graceful=False)
+                raise RuntimeError(CACHED_AUTH_REQUIRED)
+            if "steamcmd has been disconnected" in lower_line:
                 raise RuntimeError("SteamCMD disconnected or authorization expired.")
             if "error!" in lower_line or "failed to install" in lower_line or "before logon" in lower_line:
                 raise RuntimeError(line)
 
-    async def terminate_session(self):
+    async def terminate_session(self, *, graceful: bool = True):
         """Terminates the running SteamCMD process cleanly."""
         async with self._process_lock:
             self.is_logged_in = False
             self.state = "disconnected"
             process = self.process
             if process and process.returncode is None:
-                if process.stdin:
+                if graceful:
+                    if process.stdin:
+                        try:
+                            process.stdin.write(b"quit\n")
+                            await process.stdin.drain()
+                        except (BrokenPipeError, ConnectionResetError):
+                            pass
                     try:
-                        process.stdin.write(b"quit\n")
-                        await process.stdin.drain()
-                    except (BrokenPipeError, ConnectionResetError):
+                        await asyncio.wait_for(process.wait(), timeout=3.0)
+                    except asyncio.TimeoutError:
                         pass
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=3.0)
-                except asyncio.TimeoutError:
+                if process.returncode is None:
                     try:
                         if os.name == "posix":
                             os.killpg(process.pid, signal.SIGKILL)

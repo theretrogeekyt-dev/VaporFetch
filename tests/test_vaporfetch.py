@@ -157,6 +157,72 @@ for command in sys.stdin:
 
 
 class SteamCmdTests(unittest.IsolatedAsyncioTestCase):
+    async def start_fake_login(self, script, **kwargs):
+        spawn = asyncio.create_subprocess_exec
+
+        async def spawn_fake(*args, **options):
+            return await spawn(sys.executable, "-u", "-c", script, **options)
+
+        worker = SteamCmdSessionWorker()
+        self.addAsyncCleanup(worker.terminate_session)
+        patches = patch.multiple(
+            "app.steam_session", configure_steam_autologin=lambda user: None,
+            sync_steam_credentials=lambda: None, save_settings=lambda settings: None,
+        )
+        patches.start()
+        self.addCleanup(patches.stop)
+        launch = patch("app.steam_session.asyncio.create_subprocess_exec", spawn_fake)
+        launch.start()
+        self.addCleanup(launch.stop)
+        task = asyncio.create_task(worker.ensure_session("test_user", "test_password", **kwargs))
+
+        async def stop():
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        self.addAsyncCleanup(stop)
+        return worker, task
+
+    async def test_login_progress_waits_for_actual_guard_prompt(self):
+        worker, task = await self.start_fake_login("""
+import sys
+print("Steam>", end="", flush=True)
+sys.stdin.readline()
+print("Logging in user 'test_user' to Steam Public...", flush=True)
+sys.stdin.readline()
+print("Enter code:", end="", flush=True)
+code = sys.stdin.readline().strip()
+print(f"Submitted {code}", flush=True)
+print("Waiting for user info...OK", flush=True)
+sys.stdin.readline()
+""")
+        async with asyncio.timeout(5):
+            while not any("Logging in user" in line for line in worker.log_history):
+                await asyncio.sleep(0.01)
+            self.assertEqual(worker.state, "signing_in")
+            worker.process.stdin.write(b"\n")
+            await worker.process.stdin.drain()
+            while worker.state != "waiting_code":
+                await asyncio.sleep(0.01)
+            await worker.submit_steam_guard_code("abc23")
+            self.assertTrue(await task)
+        self.assertNotIn("ABC23", "\n".join(worker.log_history))
+
+    async def test_code_retry_sets_guard_code_before_login_and_redacts_it(self):
+        worker, task = await self.start_fake_login("""
+import sys
+print("Steam>", end="", flush=True)
+command = sys.stdin.readline().strip()
+assert command == "set_steam_guard_code ABC23"
+print(command, flush=True)
+assert sys.stdin.readline().strip() == "login test_user test_password"
+print("Waiting for user info...OK", flush=True)
+sys.stdin.readline()
+""", guard_code="ABC23")
+        self.assertTrue(await asyncio.wait_for(task, 5))
+        self.assertIn("set_steam_guard_code [redacted]", worker.log_history)
+
     async def test_install_path_precedes_login_and_success_matches_appid(self):
         spawn = asyncio.create_subprocess_exec
 

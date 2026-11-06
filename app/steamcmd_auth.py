@@ -10,7 +10,7 @@ from app.config import (
     sync_steam_credentials,
     extract_account_info_from_loginusers
 )
-from app.steam_session import steam_session
+from app.steam_session import normalize_guard_code, steam_session
 
 class SteamCmdAuthManager:
     def __init__(self):
@@ -67,7 +67,9 @@ class SteamCmdAuthManager:
         if self.is_authorizing():
             await asyncio.shield(asyncio.gather(self._auth_task, return_exceptions=True))
 
-    async def start_authorization(self, username: Optional[str] = None, password: Optional[str] = None) -> Dict[str, Any]:
+    async def start_authorization(
+        self, username: Optional[str] = None, password: Optional[str] = None, guard_code: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Starts persistent SteamCMD session authorization to authorize this device once and for all."""
         settings = load_settings()
         username = (username or settings.get("steamcmd_username", "")).strip()
@@ -80,6 +82,7 @@ class SteamCmdAuthManager:
 
         if self.is_authorizing():
             raise ValueError("A Steam Guard authorization is already in progress.")
+        code = normalize_guard_code(guard_code) if guard_code else ""
 
         self.state = "starting"
         self.status_message = "Starting SteamCMD authorization..."
@@ -92,7 +95,7 @@ class SteamCmdAuthManager:
                     self.log_lines.pop(0)
 
             try:
-                await steam_session.ensure_session(username, password, log_callback=_log)
+                await steam_session.ensure_session(username, password, log_callback=_log, guard_code=code)
                 save_settings({
                     "steamcmd_authorized": True,
                     "steamcmd_username": username,

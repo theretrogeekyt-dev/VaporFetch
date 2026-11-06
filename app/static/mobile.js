@@ -224,6 +224,7 @@ async function logoutMobile() {
 
 // ---------------- Steam Guard Mobile Login (App Approval) ---------------- //
 let mobileLoginPollTimer = null;
+let mobileSteamCmdState = "";
 
 function openLoginModal() {
   vibrate(12);
@@ -256,7 +257,10 @@ function closeLoginModal() {
   if (mobileLoginPollTimer) {
     clearInterval(mobileLoginPollTimer);
     mobileLoginPollTimer = null;
+    fetch("/api/auth/steamcmd/cancel", {method: "POST"}).catch(() => {});
   }
+  document.getElementById("mLoginPassword").value = "";
+  document.getElementById("mLoginCodeInput").value = "";
   const modal = document.getElementById("mobileLoginModal");
   if (modal) modal.style.display = "none";
 }
@@ -293,6 +297,9 @@ async function submitMobileLogin(event) {
   if (formStage) formStage.style.display = "none";
   if (approvalStage) approvalStage.style.display = "block";
   if (statusText) statusText.textContent = "Connecting to Steam servers...";
+  document.getElementById("mLoginFallbackWrap").style.display = "none";
+  document.getElementById("mLoginCodeInput").value = "";
+  mobileSteamCmdState = "starting";
 
   try {
     const res = await fetch("/api/auth/steamcmd/authorize", {
@@ -326,28 +333,25 @@ function pollMobileLoginStatus() {
   if (mobileLoginPollTimer) clearInterval(mobileLoginPollTimer);
 
   mobileLoginPollTimer = setInterval(async () => {
+    const timer = mobileLoginPollTimer;
     try {
       const res = await fetch("/api/auth/steamcmd/status");
       if (!res.ok) return;
       const data = await res.json();
+      if (!timer || mobileLoginPollTimer !== timer) return;
+      mobileSteamCmdState = data.state;
 
       const statusText = document.getElementById("mLoginStatusText");
       const fallbackWrap = document.getElementById("mLoginFallbackWrap");
 
-      if (data.state === "waiting_approval") {
-        if (statusText) statusText.textContent = "Steam Guard request sent! Please tap 'Approve' in your Steam Mobile app.";
-      } else if (data.state === "waiting_code") {
-        if (statusText) statusText.textContent = "Steam Guard code required. Enter your 5-character code below:";
-        if (fallbackWrap) fallbackWrap.style.display = "block";
-        document.getElementById("mLoginCodeInput")?.focus();
-      } else if (data.status_message) {
-        if (statusText) statusText.textContent = data.status_message;
-      }
+      if (statusText && data.status_message) statusText.textContent = data.status_message;
+      if (fallbackWrap) fallbackWrap.style.display = ["signing_in", "waiting_code", "waiting_approval", "error"].includes(data.state) ? "block" : "none";
 
       // Check success
       if (data.state === "success") {
         clearInterval(mobileLoginPollTimer);
         mobileLoginPollTimer = null;
+        document.getElementById("mLoginPassword").value = "";
         vibrate([20, 60, 20]);
 
         const approvalStage = document.getElementById("mLoginApprovalStage");
@@ -373,16 +377,6 @@ function pollMobileLoginStatus() {
         mobileLoginPollTimer = null;
         vibrate(40);
 
-        const formStage = document.getElementById("mLoginFormStage");
-        const approvalStage = document.getElementById("mLoginApprovalStage");
-        const errEl = document.getElementById("mLoginError");
-
-        if (formStage) formStage.style.display = "block";
-        if (approvalStage) approvalStage.style.display = "none";
-        if (errEl) {
-          errEl.textContent = data.status_message || "Login failed. Please verify credentials.";
-          errEl.style.display = "block";
-        }
         showToast(data.status_message || "Steam login failed", true);
       }
     } catch (e) {
@@ -395,20 +389,21 @@ async function submitMobileLoginCode() {
   const codeInput = document.getElementById("mLoginCodeInput");
   const code = codeInput?.value?.trim() || "";
   if (!code) return;
+  const button = document.getElementById("mLoginCodeSubmit");
+  button.disabled = true;
 
   try {
-    const res = await fetch("/api/auth/steamcmd/code", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: code })
+    await sendSteamGuardCode(code, mobileSteamCmdState, {
+      username: document.getElementById("mLoginUsername").value.trim(),
+      password: document.getElementById("mLoginPassword").value,
     });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "Failed to submit code");
-    }
+    codeInput.value = "";
+    if (!mobileLoginPollTimer) pollMobileLoginStatus();
     showToast("Submitted Steam Guard code, verifying...");
   } catch (e) {
     showToast(e.message, true);
+  } finally {
+    button.disabled = false;
   }
 }
 

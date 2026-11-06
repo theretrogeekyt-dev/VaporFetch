@@ -342,7 +342,7 @@
         <div class="one-time-info-box">
           <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
           <div>
-            <strong>One-Time Setup:</strong> Enter your Steam password below. VaporFetch saves it to your NAS persistent storage so SteamCMD can batch-download your games automatically without asking again.
+            Enter your Steam password to authorize SteamCMD. VaporFetch saves it on your NAS after Steam confirms the sign-in.
           </div>
         </div>
 
@@ -359,7 +359,7 @@
           <div class="modal-actions" style="margin-top: 24px; justify-content: space-between;">
             <button type="button" class="btn btn-secondary btn-sm" onclick="skipPasswordSetup()">Skip for now</button>
             <button type="submit" class="btn btn-primary" id="savePasswordBtn">
-              Save Password & Authorize Device
+              Authorize Device
             </button>
           </div>
         </form>
@@ -376,15 +376,16 @@
         <div class="one-time-info-box" id="authStageInfoBox">
           <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
           <div id="authStageStatusText">
-            <strong>Steam Guard Prompt:</strong> Please check your Steam Mobile app on your phone. When the sign-in notification appears, tap <strong>"Approve"</strong>.
+            Starting SteamCMD and connecting to Steam…
           </div>
         </div>
 
         <div id="authCodeInputGroup" style="display: none; margin-top: 16px; text-align: left;">
-          <label for="steamCmdCodeInput">Steam Guard 2FA Code</label>
+          <label for="steamCmdCodeInput">Steam Guard code</label>
+          <small class="form-hint">In the Steam Mobile app, open Steam Guard and choose Show Steam Guard code. Use the email code if Steam sent one.</small>
           <div style="display: flex; gap: 8px; margin-top: 6px;">
-            <input type="text" id="steamCmdCodeInput" placeholder="Enter code" maxlength="10" style="flex: 1; text-transform: uppercase; font-family: monospace; font-size: 15px; letter-spacing: 2px;">
-            <button type="button" class="btn btn-primary btn-sm" onclick="submitSteamCmdCode()">Submit</button>
+            <input type="text" id="steamCmdCodeInput" placeholder="Enter code" maxlength="8" autocomplete="one-time-code" style="flex: 1; text-transform: uppercase; font-family: monospace; font-size: 15px; letter-spacing: 2px;">
+            <button type="button" class="btn btn-primary btn-sm" id="steamCmdCodeSubmit" onclick="submitSteamCmdCode()">Submit Code</button>
           </div>
         </div>
 

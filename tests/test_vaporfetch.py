@@ -17,7 +17,7 @@ with patch.dict(os.environ, {
 }):
     from app import main
     from app.goldberg import GoldbergManager
-    from app.queue_manager import DownloadQueueManager, QueueItem, safe_install_path
+    from app.queue_manager import DownloadQueueManager, QueueItem, SAVED_STEAMAPPS, safe_install_path
     from app.steam_session import SteamCmdSessionWorker
     from app.storage import write_json
 
@@ -131,6 +131,60 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(OSError):
                 manager.add_to_queue([{"appid": 1}])
         self.assertEqual(manager.items, [])
+
+    async def test_metadata_only_steamapps_is_hidden_and_restored_for_updates(self):
+        manager = DownloadQueueManager()
+        install = self.downloads / "Original title [740]"
+        steamapps = install / "steamapps"
+        archived = install / SAVED_STEAMAPPS
+        manifest = "appmanifest_740.acf"
+
+        async def download(*, install_path, **kwargs):
+            self.assertEqual(install_path, install)
+            if steamapps.exists():
+                self.assertFalse(archived.exists())
+                self.assertEqual((steamapps / manifest).read_text(), "first install")
+                (steamapps / manifest).write_text("updated install")
+            else:
+                (steamapps / "downloading").mkdir(parents=True)
+                (steamapps / "temp").mkdir()
+                (steamapps / manifest).write_text("first install")
+
+        with patch("app.queue_manager.steam_session.run_download_job", side_effect=download), patch(
+            "app.queue_manager.steam_session.terminate_session", new_callable=AsyncMock
+        ) as quit_session:
+            first, = manager.add_to_queue([{"appid": 740, "name": "Original title"}])
+            await asyncio.wait_for(manager._worker_task, 2)
+            self.assertEqual(first.status, "completed")
+            self.assertFalse(steamapps.exists())
+            self.assertEqual((archived / manifest).read_text(), "first install")
+
+            manager.clear_completed()
+            second, = manager.add_to_queue([{"appid": 740, "name": "Renamed title"}])
+            await asyncio.wait_for(manager._worker_task, 2)
+            self.assertEqual(second.status, "completed")
+            self.assertFalse(steamapps.exists())
+            self.assertEqual((archived / manifest).read_text(), "updated install")
+            self.assertEqual(quit_session.await_count, 2)
+
+    async def test_steamapps_with_game_files_stays_in_place(self):
+        manager = DownloadQueueManager()
+        game_file = self.downloads / "App 740 [740]" / "steamapps" / "common" / "game.bin"
+
+        async def download(**kwargs):
+            game_file.parent.mkdir(parents=True)
+            game_file.write_bytes(b"game")
+
+        with patch("app.queue_manager.steam_session.run_download_job", side_effect=download), patch(
+            "app.queue_manager.steam_session.terminate_session", new_callable=AsyncMock
+        ) as quit_session:
+            item, = manager.add_to_queue([{"appid": 740}])
+            await asyncio.wait_for(manager._worker_task, 2)
+
+        self.assertEqual(item.status, "completed")
+        self.assertEqual(game_file.read_bytes(), b"game")
+        self.assertFalse((Path(item.install_dir) / SAVED_STEAMAPPS).exists())
+        quit_session.assert_not_awaited()
 
 
 FAKE_STEAMCMD = """

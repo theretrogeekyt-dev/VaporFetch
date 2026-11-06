@@ -14,6 +14,7 @@ from app.steam_session import steam_session
 from app.storage import write_json
 
 QUEUE_FILE = DATA_DIR / "queue.json"
+SAVED_STEAMAPPS = ".vaporfetch-steamapps"
 logger = logging.getLogger(__name__)
 
 
@@ -40,15 +41,55 @@ def find_existing_install(appid: int) -> Optional[Path]:
     manifest = f"appmanifest_{appid}.acf"
     for child in DOWNLOAD_DIR.iterdir():
         if child.is_dir() and safe_install_path(child):
-            if (child / manifest).is_file() or (child / "steamapps" / manifest).is_file():
+            if any((child / directory / manifest).is_file() for directory in ("", "steamapps", SAVED_STEAMAPPS)):
                 return child
     return None
+
+
+def steamapps_is_metadata_only(steamapps: Path, appid: int) -> bool:
+    """Check for the game's manifest and empty directories only."""
+    if steamapps.is_symlink() or not steamapps.is_dir():
+        return False
+    for entry in steamapps.iterdir():
+        if entry.is_symlink():
+            return False
+        if entry.name == f"appmanifest_{appid}.acf" and entry.is_file():
+            continue
+        if entry.is_dir() and not any(entry.iterdir()):
+            continue
+        return False
+    return True
+
+
+def restore_steamapps(install_path: Path, log_tail: List[str]) -> None:
+    saved = install_path / SAVED_STEAMAPPS
+    if saved.is_symlink() or not saved.is_dir():
+        return
+    steamapps = install_path / "steamapps"
+    if steamapps.exists() or steamapps.is_symlink():
+        log_tail.append("Keeping existing steamapps and its separate saved copy.")
+        return
+    saved.rename(steamapps)
+
+
+async def archive_steamapps(install_path: Path, appid: int, log_tail: List[str]) -> None:
+    steamapps = install_path / "steamapps"
+    saved = install_path / SAVED_STEAMAPPS
+    try:
+        if saved.exists() or saved.is_symlink() or not steamapps_is_metadata_only(steamapps, appid):
+            return
+        # Give SteamCMD a chance to flush its install state before moving the directory.
+        await steam_session.terminate_session()
+        if steamapps_is_metadata_only(steamapps, appid) and not (saved.exists() or saved.is_symlink()):
+            steamapps.rename(saved)
+            log_tail.append("Moved SteamCMD metadata into a hidden folder for future updates.")
+    except OSError as exc:
+        log_tail.append(f"Could not tidy SteamCMD's folder: {exc}")
 
 
 async def post_process_game_directory(
     install_path: Path, appid: int, log_tail: List[str], require_goldberg: bool = False
 ):
-    # Retain SteamCMD's layout and manifests so retries and future validation can reuse the depot.
     settings = load_settings()
     if not (require_goldberg or settings.get("enable_goldberg", False)):
         return
@@ -321,6 +362,7 @@ class DownloadQueueManager:
         item.install_dir = str(install_path)
         item.log_tail.append(f"Starting download for {item.name} (AppID: {item.appid})")
         item.log_tail.append(f"Destination: {install_path}")
+        restore_steamapps(install_path, item.log_tail)
         self._save_queue()
         self.broadcast("item_update", item.model_dump())
 
@@ -392,6 +434,7 @@ class DownloadQueueManager:
         item.step = "Finalizing download"
         self.broadcast("item_update", item.model_dump())
         await post_process_game_directory(install_path, item.appid, item.log_tail, item.require_goldberg)
+        await archive_steamapps(install_path, item.appid, item.log_tail)
         item.status = "completed"
         item.progress = 100.0
         item.speed_bps = item.eta_seconds = 0
